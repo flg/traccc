@@ -21,7 +21,7 @@
 #include "traccc/seeding/track_params_estimation.hpp"
 #include "traccc/sycl/clusterization/clusterization_algorithm.hpp"
 #include "traccc/sycl/seeding/seeding_algorithm.hpp"
-#include "traccc/sycl/seeding/spacepoint_formation_algorithm.hpp"
+#include "traccc/sycl/seeding/silicon_pixel_spacepoint_formation_algorithm.hpp"
 #include "traccc/sycl/seeding/track_params_estimation.hpp"
 
 // performance
@@ -134,8 +134,7 @@ int seq_run(const traccc::opts::detector& detector_opts,
     using host_spacepoint_formation_algorithm =
         traccc::host::silicon_pixel_spacepoint_formation_algorithm;
     using device_spacepoint_formation_algorithm =
-        traccc::sycl::spacepoint_formation_algorithm<
-            traccc::default_detector::device>;
+        traccc::sycl::silicon_pixel_spacepoint_formation_algorithm;
 
     // Constant B field for the track finding and fitting
     const traccc::vector3 field_vec = {0.f, 0.f,
@@ -192,9 +191,11 @@ int seq_run(const traccc::opts::detector& detector_opts,
                 traccc::performance::timer t("File reading  (cpu)",
                                              elapsedTimes);
                 // Read the cells from the relevant event file into host memory.
+                static constexpr bool DEDUPLICATE = true;
                 traccc::io::read_cells(cells_per_event, event,
                                        input_opts.directory, &host_det_descr,
-                                       input_opts.format);
+                                       input_opts.format, DEDUPLICATE,
+                                       input_opts.use_acts_geom_source);
             }  // stop measuring file reading timer
 
             n_cells += cells_per_event.size();

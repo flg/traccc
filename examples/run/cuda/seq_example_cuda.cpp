@@ -17,8 +17,9 @@
 #include "traccc/cuda/utils/stream.hpp"
 #include "traccc/device/container_d2h_copy_alg.hpp"
 #include "traccc/efficiency/seeding_performance_writer.hpp"
-#include "traccc/finding/ckf_algorithm.hpp"
-#include "traccc/fitting/fitting_algorithm.hpp"
+#include "traccc/finding/combinatorial_kalman_filter_algorithm.hpp"
+#include "traccc/fitting/kalman_filter/kalman_fitter.hpp"
+#include "traccc/fitting/kalman_fitting_algorithm.hpp"
 #include "traccc/io/read_cells.hpp"
 #include "traccc/io/read_detector.hpp"
 #include "traccc/io/read_detector_description.hpp"
@@ -131,17 +132,15 @@ int seq_run(const traccc::opts::detector& detector_opts,
         detray::rk_stepper<detray::bfield::const_field_t::view_t,
                            traccc::default_detector::host::algebra_type,
                            detray::constrained_step<>>;
-    using host_navigator_type =
-        detray::navigator<const traccc::default_detector::host>;
     using device_navigator_type =
         detray::navigator<const traccc::default_detector::device>;
 
-    using host_finding_algorithm = traccc::host::ckf_algorithm;
+    using host_finding_algorithm =
+        traccc::host::combinatorial_kalman_filter_algorithm;
     using device_finding_algorithm =
         traccc::cuda::finding_algorithm<stepper_type, device_navigator_type>;
 
-    using host_fitting_algorithm = traccc::fitting_algorithm<
-        traccc::kalman_fitter<stepper_type, host_navigator_type>>;
+    using host_fitting_algorithm = traccc::host::kalman_fitting_algorithm;
     using device_fitting_algorithm = traccc::cuda::fitting_algorithm<
         traccc::kalman_fitter<stepper_type, device_navigator_type>>;
 
@@ -167,7 +166,7 @@ int seq_run(const traccc::opts::detector& detector_opts,
                                  seeding_opts.seedfilter, host_mr);
     traccc::track_params_estimation tp(host_mr);
     host_finding_algorithm finding_alg(finding_cfg);
-    host_fitting_algorithm fitting_alg(fitting_cfg);
+    host_fitting_algorithm fitting_alg(fitting_cfg, host_mr);
 
     traccc::cuda::clusterization_algorithm ca_cuda(mr, copy, stream,
                                                    clusterization_opts);
@@ -225,9 +224,11 @@ int seq_run(const traccc::opts::detector& detector_opts,
                 traccc::performance::timer t("File reading  (cpu)",
                                              elapsedTimes);
                 // Read the cells from the relevant event file into host memory.
+                static constexpr bool DEDUPLICATE = true;
                 traccc::io::read_cells(cells_per_event, event,
                                        input_opts.directory, &host_det_descr,
-                                       input_opts.format);
+                                       input_opts.format, DEDUPLICATE,
+                                       input_opts.use_acts_geom_source);
             }  // stop measuring file reading timer
 
             n_cells += cells_per_event.size();
@@ -342,7 +343,8 @@ int seq_run(const traccc::opts::detector& detector_opts,
                     traccc::performance::timer timer{"Track fitting (cpu)",
                                                      elapsedTimes};
                     track_states =
-                        fitting_alg(host_detector, field, track_candidates);
+                        fitting_alg(host_detector, field,
+                                    traccc::get_data(track_candidates));
                 }
             }
 

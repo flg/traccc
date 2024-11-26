@@ -9,14 +9,13 @@
 
 // Project include(s).
 #include "traccc/edm/silicon_cell_collection.hpp"
-#include "traccc/finding/ckf_algorithm.hpp"
-#include "traccc/fitting/fitting_algorithm.hpp"
-#include "traccc/fitting/kalman_filter/kalman_fitter.hpp"
+#include "traccc/finding/combinatorial_kalman_filter_algorithm.hpp"
+#include "traccc/fitting/kalman_fitting_algorithm.hpp"
 #include "traccc/geometry/detector.hpp"
 #include "traccc/geometry/silicon_detector_description.hpp"
 #include "traccc/sycl/clusterization/clusterization_algorithm.hpp"
 #include "traccc/sycl/seeding/seeding_algorithm.hpp"
-#include "traccc/sycl/seeding/spacepoint_formation_algorithm.hpp"
+#include "traccc/sycl/seeding/silicon_pixel_spacepoint_formation_algorithm.hpp"
 #include "traccc/sycl/seeding/track_params_estimation.hpp"
 #include "traccc/utils/algorithm.hpp"
 
@@ -68,15 +67,14 @@ class full_chain_algorithm
     using navigator_type = detray::navigator<const device_detector_type>;
     /// Spacepoint formation algorithm type
     using spacepoint_formation_algorithm =
-        traccc::sycl::spacepoint_formation_algorithm<
-            traccc::default_detector::device>;
+        traccc::sycl::silicon_pixel_spacepoint_formation_algorithm;
     /// Clustering algorithm type
     using clustering_algorithm = clusterization_algorithm;
     /// Track finding algorithm type
-    using finding_algorithm = traccc::host::ckf_algorithm;
+    using finding_algorithm =
+        traccc::host::combinatorial_kalman_filter_algorithm;
     /// Track fitting algorithm type
-    using fitting_algorithm = traccc::fitting_algorithm<
-        traccc::kalman_fitter<stepper_type, navigator_type>>;
+    using fitting_algorithm = traccc::host::kalman_fitting_algorithm;
 
     /// @}
 
@@ -118,13 +116,13 @@ class full_chain_algorithm
 
     private:
     /// Private data object
-    details::full_chain_algorithm_data* m_data;
+    std::unique_ptr<details::full_chain_algorithm_data> m_data;
     /// Host memory resource
-    vecmem::memory_resource& m_host_mr;
+    std::reference_wrapper<vecmem::memory_resource> m_host_mr;
     /// Device memory resource
-    std::unique_ptr<vecmem::sycl::device_memory_resource> m_device_mr;
+    vecmem::sycl::device_memory_resource m_device_mr;
     /// Device caching memory resource
-    std::unique_ptr<vecmem::binary_page_memory_resource> m_cached_device_mr;
+    mutable vecmem::binary_page_memory_resource m_cached_device_mr;
     /// Memory copy object
     mutable vecmem::sycl::async_copy m_copy;
 

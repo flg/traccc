@@ -46,8 +46,12 @@
 #else
 #include <tbb/global_control.h>
 #endif
+#include <tbb/parallel_for.h>
 #include <tbb/task_arena.h>
 #include <tbb/task_group.h>
+
+// Indicators include(s).
+#include <indicators/progress_bar.hpp>
 
 // System include(s).
 #include <atomic>
@@ -83,13 +87,6 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
     // Set up the timing info holder.
     performance::timing_info times;
 
-    // Set up the TBB arena and thread group.
-    tbb::global_control global_thread_limit(
-        tbb::global_control::max_allowed_parallelism,
-        threading_opts.threads + 1);
-    tbb::task_arena arena{static_cast<int>(threading_opts.threads), 0};
-    tbb::task_group group;
-
     // Memory resource to use in the test.
     HOST_MR uncached_host_mr;
 
@@ -112,13 +109,26 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
     vecmem::vector<edm::silicon_cell_collection::host> input{&uncached_host_mr};
     {
         performance::timer t{"File reading", times};
-        // Read the input cells into memory event-by-event.
+        // Set up the container for the input events.
         input.reserve(input_opts.events);
-        for (std::size_t i = 0; i < input_opts.events; ++i) {
+        const std::size_t first_event = input_opts.skip;
+        const std::size_t last_event = input_opts.skip + input_opts.events;
+        for (std::size_t i = first_event; i < last_event; ++i) {
             input.push_back({uncached_host_mr});
-            io::read_cells(input.back(), i, input_opts.directory, &det_descr,
-                           input_opts.format);
         }
+        // Read the input cells into memory in parallel.
+        tbb::parallel_for(
+            tbb::blocked_range<std::size_t>{first_event, last_event},
+            [&](const tbb::blocked_range<std::size_t>& event_range) {
+                for (std::size_t event = event_range.begin();
+                     event != event_range.end(); ++event) {
+                    static constexpr bool DEDUPLICATE = true;
+                    io::read_cells(input.at(event - input_opts.skip), event,
+                                   input_opts.directory, &det_descr,
+                                   input_opts.format, DEDUPLICATE,
+                                   input_opts.use_acts_geom_source);
+                }
+            });
     }
 
     // Set up cached memory resources on top of the host memory resource
@@ -168,6 +178,14 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
              (detector_opts.use_detray_detector ? &detector : nullptr)});
     }
 
+    // Set up the TBB arena and thread group. From here on out TBB is only
+    // allowed to use the specified number of threads.
+    tbb::global_control global_thread_limit(
+        tbb::global_control::max_allowed_parallelism,
+        threading_opts.threads + 1);
+    tbb::task_arena arena{static_cast<int>(threading_opts.threads), 0};
+    tbb::task_group group;
+
     // Seed the random number generator.
     std::srand(static_cast<unsigned int>(std::time(0)));
 
@@ -178,6 +196,14 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
     // Cold Run events. To discard any "initialisation issues" in the
     // measurements.
     {
+        // Set up a progress bar for the warm-up processing.
+        indicators::ProgressBar progress_bar{
+            indicators::option::BarWidth{50},
+            indicators::option::PrefixText{"Warm-up processing "},
+            indicators::option::ShowPercentage{true},
+            indicators::option::ShowRemainingTime{true},
+            indicators::option::MaxProgress{throughput_opts.cold_run_events}};
+
         // Measure the time of execution.
         performance::timer t{"Warm-up processing", times};
 
@@ -195,6 +221,7 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
                         tbb::this_task_arena::current_thread_index()))(
                                                        input[event])
                                                    .size());
+                    progress_bar.tick();
                 });
             });
         }
@@ -207,6 +234,14 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
     rec_track_params = 0;
 
     {
+        // Set up a progress bar for the event processing.
+        indicators::ProgressBar progress_bar{
+            indicators::option::BarWidth{50},
+            indicators::option::PrefixText{"Event processing   "},
+            indicators::option::ShowPercentage{true},
+            indicators::option::ShowRemainingTime{true},
+            indicators::option::MaxProgress{throughput_opts.processed_events}};
+
         // Measure the total time of execution.
         performance::timer t{"Event processing", times};
 
@@ -224,6 +259,7 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
                         tbb::this_task_arena::current_thread_index()))(
                                                        input[event])
                                                    .size());
+                    progress_bar.tick();
                 });
             });
         }
