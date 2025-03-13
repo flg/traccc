@@ -80,7 +80,6 @@ TEST(seeding, case1) {
 }
 
 TEST(seeding, case2) {
-
     // Config objects
     traccc::seedfinder_config finder_config;
     traccc::spacepoint_grid_config grid_config(finder_config);

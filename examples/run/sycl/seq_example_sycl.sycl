@@ -22,6 +22,8 @@
 #include "traccc/device/container_d2h_copy_alg.hpp"
 #include "traccc/finding/combinatorial_kalman_filter_algorithm.hpp"
 #include "traccc/seeding/seeding_algorithm.hpp"
+#include "traccc/fitting/kalman_filter/kalman_fitter.hpp"
+#include "traccc/fitting/kalman_fitting_algorithm.hpp"
 #include "traccc/seeding/silicon_pixel_spacepoint_formation_algorithm.hpp"
 #include "traccc/seeding/track_params_estimation.hpp"
 #include "traccc/sycl/clusterization/clusterization_algorithm.hpp"
@@ -30,6 +32,7 @@
 #include "traccc/sycl/seeding/seeding_algorithm.hpp"
 #include "traccc/sycl/seeding/silicon_pixel_spacepoint_formation_algorithm.hpp"
 #include "traccc/sycl/seeding/track_params_estimation.hpp"
+#include "traccc/sycl/fitting/kalman_fitting_algorithm.hpp"
 
 // performance
 #include "traccc/efficiency/seeding_performance_writer.hpp"
@@ -90,7 +93,7 @@ int seq_run(const traccc::opts::detector& detector_opts,
             const traccc::opts::track_seeding& seeding_opts,
             const traccc::opts::track_finding& finding_opts,
             const traccc::opts::track_propagation& propagation_opts,
-            const traccc::opts::track_fitting& /*fitting_opts*/,
+            const traccc::opts::track_fitting& fitting_opts,
             const traccc::opts::performance& performance_opts,
             const traccc::opts::accelerator& accelerator_opts,
             std::unique_ptr<const traccc::Logger> ilogger) {
@@ -149,6 +152,8 @@ int seq_run(const traccc::opts::detector& detector_opts,
     uint64_t n_seeds_sycl = 0;
     uint64_t n_found_tracks = 0;
     uint64_t n_found_tracks_sycl = 0;
+    uint64_t n_fitted_tracks = 0;
+    uint64_t n_fitted_tracks_sycl = 0;
 
     // Constant B field for the track finding and fitting
     using scalar_type = traccc::default_detector::host::scalar_type;
@@ -163,6 +168,9 @@ int seq_run(const traccc::opts::detector& detector_opts,
     traccc::finding_config finding_cfg(finding_opts);
     finding_cfg.propagation = propagation_config;
 
+    traccc::fitting_config fitting_cfg(fitting_opts);
+    fitting_cfg.propagation = propagation_config;
+
     // Algorithms.
     traccc::host::clusterization_algorithm ca(
         host_mr, logger().clone("HostClusteringAlg"));
@@ -175,6 +183,8 @@ int seq_run(const traccc::opts::detector& detector_opts,
         host_mr, logger().clone("HostTrackParEstAlg"));
     traccc::host::combinatorial_kalman_filter_algorithm finding_alg{
         finding_cfg, logger().clone("HostFindingAlg")};
+    traccc::host::kalman_fitting_algorithm fitting_alg(fitting_cfg, host_mr,
+        logger().clone("HostFittingAlg"));
 
     traccc::sycl::clusterization_algorithm ca_sycl(
         mr, copy, queue, clusterization_opts,
@@ -191,13 +201,17 @@ int seq_run(const traccc::opts::detector& detector_opts,
         mr, copy, &q, logger().clone("SyclTrackParEstAlg"));
     traccc::sycl::combinatorial_kalman_filter_algorithm finding_alg_sycl{
         finding_cfg, mr, copy, queue, logger().clone("SyclFindingAlg")};
+    traccc::sycl::kalman_fitting_algorithm fitting_alg_sycl{fitting_cfg, mr,
+        copy, queue, logger().clone("SyclFittingAlg")};
 
     traccc::device::container_d2h_copy_alg<
         traccc::track_candidate_container_types>
         copy_track_candidates{mr, copy,
-                              logger().clone("TrackCandidateD2HCopyAlg")};
+                            logger().clone("TrackCandidateD2HCopyAlg")};
+    traccc::device::container_d2h_copy_alg<traccc::track_state_container_types>
+        copy_track_states(mr, copy, logger().clone("TrackStateD2HCopyAlg"));
 
-    // performance writer
+        // performance writer
     traccc::seeding_performance_writer sd_performance_writer(
         traccc::seeding_performance_writer::config{});
 
@@ -215,6 +229,8 @@ int seq_run(const traccc::opts::detector& detector_opts,
         traccc::host::track_params_estimation::output_type params{&host_mr};
         traccc::host::combinatorial_kalman_filter_algorithm::output_type
             track_candidates{&host_mr};
+            traccc::host::kalman_fitting_algorithm::output_type track_states;
+
 
         // Instantiate SYCL containers/collections
         traccc::sycl::clusterization_algorithm::output_type
@@ -226,6 +242,8 @@ int seq_run(const traccc::opts::detector& detector_opts,
             0, *mr.host);
         traccc::sycl::combinatorial_kalman_filter_algorithm::output_type
             track_candidates_sycl_buffer;
+        traccc::track_state_container_types::buffer track_states_sycl_buffer;
+
 
         {
             traccc::performance::timer wall_t("Wall time", elapsedTimes);
@@ -345,6 +363,24 @@ int seq_run(const traccc::opts::detector& detector_opts,
                                     vecmem::get_data(measurements_per_event),
                                     vecmem::get_data(params));
                 }
+
+                // SYCL
+                {
+                    traccc::performance::timer timer{"Track fitting (sycl)",
+                                                     elapsedTimes};
+                    track_states_sycl_buffer = fitting_alg_sycl(
+                        device_detector_view, field, track_candidates_sycl_buffer);
+                    q.wait_and_throw();
+                }
+
+                // CPU
+                if (accelerator_opts.compare_with_cpu) {
+                    traccc::performance::timer timer{"Track fitting (cpu)",
+                                                     elapsedTimes};
+                    track_states =
+                        fitting_alg(host_detector, field,
+                                    traccc::get_data(track_candidates));
+                }
             }
         }  // stop measuring wall time
 
@@ -366,6 +402,7 @@ int seq_run(const traccc::opts::detector& detector_opts,
         copy(params_sycl_buffer, params_sycl)->wait();
         auto track_candidates_sycl =
             copy_track_candidates(track_candidates_sycl_buffer);
+        auto track_states_sycl = copy_track_states(track_states_sycl_buffer);
         q.wait_and_throw();
 
         if (accelerator_opts.compare_with_cpu) {
@@ -429,6 +466,13 @@ int seq_run(const traccc::opts::detector& detector_opts,
                                    std::max(track_candidates.size(),
                                             track_candidates_sycl.size()))
                         << "%");
+            // Compare tracks fitted on the host and on the device.
+            traccc::collection_comparator<
+                traccc::track_state_container_types::host::header_type>
+                compare_track_states{"track states"};
+            compare_track_states(
+                vecmem::get_data(track_states.get_headers()),
+                vecmem::get_data(track_states_sycl.get_headers()));
         }
 
         /// Statistics
@@ -439,6 +483,8 @@ int seq_run(const traccc::opts::detector& detector_opts,
         n_seeds += seeds.size();
         n_found_tracks += track_candidates.size();
         n_found_tracks_sycl += track_candidates_sycl.size();
+        n_fitted_tracks += track_states.size();
+        n_fitted_tracks_sycl += track_states_sycl.size();
 
         if (performance_opts.run) {
 
@@ -469,6 +515,8 @@ int seq_run(const traccc::opts::detector& detector_opts,
     TRACCC_INFO("- created (sycl) " << n_seeds_sycl << " seeds");
     TRACCC_INFO("- found (cpu)    " << n_found_tracks << " tracks");
     TRACCC_INFO("- found (sycl)   " << n_found_tracks_sycl << " tracks");
+    TRACCC_INFO("- fitted (cpu)   " << n_fitted_tracks << " tracks");
+    TRACCC_INFO("- fitted (sycl)  " << n_fitted_tracks_sycl << " tracks");
     TRACCC_INFO("==>Elapsed times...\n" << elapsedTimes);
 
     return 0;
