@@ -18,17 +18,21 @@ full_chain_algorithm::full_chain_algorithm(
     const finding_algorithm::config_type& finding_config,
     const fitting_algorithm::config_type& fitting_config,
     const silicon_detector_description::host& det_descr,
-    detector_type* detector)
-    : m_field_vec{0.f, 0.f, finder_config.bFieldInZ},
-      m_field(detray::bfield::create_const_field(m_field_vec)),
+    detector_type* detector, std::unique_ptr<const traccc::Logger> logger)
+    : messaging(logger->clone()),
+      m_field_vec{0.f, 0.f, finder_config.bFieldInZ},
+      m_field(detray::bfield::create_const_field<
+              typename detector_type::scalar_type>(m_field_vec)),
       m_det_descr(det_descr),
       m_detector(detector),
-      m_clusterization(mr),
-      m_spacepoint_formation(mr),
-      m_seeding(finder_config, grid_config, filter_config, mr),
-      m_track_parameter_estimation(mr),
-      m_finding(finding_config),
-      m_fitting(fitting_config, mr),
+      m_clusterization(mr, logger->cloneWithSuffix("ClusteringAlg")),
+      m_spacepoint_formation(mr, logger->cloneWithSuffix("SpFormationAlg")),
+      m_seeding(finder_config, grid_config, filter_config, mr,
+                logger->cloneWithSuffix("SeedingAlg")),
+      m_track_parameter_estimation(mr,
+                                   logger->cloneWithSuffix("TrackParamEstAlg")),
+      m_finding(finding_config, logger->cloneWithSuffix("TrackFindingAlg")),
+      m_fitting(fitting_config, mr, logger->cloneWithSuffix("TrackFittingAlg")),
       m_finder_config(finder_config),
       m_grid_config(grid_config),
       m_filter_config(filter_config),
@@ -55,9 +59,15 @@ full_chain_algorithm::output_type full_chain_algorithm::operator()(
             vecmem::get_data(measurements);
         const spacepoint_formation_algorithm::output_type spacepoints =
             m_spacepoint_formation(*m_detector, measurements_view);
-        const track_params_estimation::output_type track_params =
-            m_track_parameter_estimation(spacepoints, m_seeding(spacepoints),
-                                         m_field_vec);
+        const edm::spacepoint_collection::const_data spacepoints_data =
+            vecmem::get_data(spacepoints);
+        const host::seeding_algorithm::output_type seeds =
+            m_seeding(spacepoints_data);
+        const edm::seed_collection::const_data seeds_data =
+            vecmem::get_data(seeds);
+        const host::track_params_estimation::output_type track_params =
+            m_track_parameter_estimation(measurements_view, spacepoints_data,
+                                         seeds_data, m_field_vec);
         const bound_track_parameters_collection_types::const_view
             track_params_view = vecmem::get_data(track_params);
 

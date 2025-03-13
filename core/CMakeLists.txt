@@ -1,6 +1,6 @@
 # TRACCC library, part of the ACTS project (R&D line)
 #
-# (c) 2021-2024 CERN for the benefit of the ACTS project
+# (c) 2021-2025 CERN for the benefit of the ACTS project
 #
 # Mozilla Public License Version 2.0
 
@@ -20,18 +20,19 @@ traccc_add_library( traccc_core core TYPE SHARED
   "include/traccc/edm/details/container_element.hpp"
   "include/traccc/edm/details/device_container.hpp"
   "include/traccc/edm/details/host_container.hpp"
-  "include/traccc/edm/spacepoint.hpp"
   "include/traccc/edm/measurement.hpp"
   "include/traccc/edm/particle.hpp"
   "include/traccc/edm/track_parameters.hpp"
   "include/traccc/edm/container.hpp"
-  "include/traccc/edm/internal_spacepoint.hpp"
-  "include/traccc/edm/seed.hpp"
   "include/traccc/edm/track_candidate.hpp"
   "include/traccc/edm/track_state.hpp"
   "include/traccc/edm/silicon_cell_collection.hpp"
   "include/traccc/edm/impl/silicon_cell_collection.ipp"
   "include/traccc/edm/silicon_cluster_collection.hpp"
+  "include/traccc/edm/spacepoint_collection.hpp"
+  "include/traccc/edm/impl/spacepoint_collection.ipp"
+  "include/traccc/edm/seed_collection.hpp"
+  "include/traccc/edm/impl/seed_collection.ipp"
   # Geometry description.
   "include/traccc/geometry/detector.hpp"
   "include/traccc/geometry/module_map.hpp"
@@ -44,6 +45,8 @@ traccc_add_library( traccc_core core TYPE SHARED
   "include/traccc/utils/memory_resource.hpp"
   "include/traccc/utils/seed_generator.hpp"
   "include/traccc/utils/subspace.hpp"
+  "include/traccc/utils/logging.hpp"
+  "src/utils/logging.cpp"
   # Clusterization algorithmic code.
   "include/traccc/clusterization/details/sparse_ccl.hpp"
   "include/traccc/clusterization/impl/sparse_ccl.ipp"
@@ -74,6 +77,7 @@ traccc_add_library( traccc_core core TYPE SHARED
   "include/traccc/fitting/kalman_filter/kalman_fitter.hpp"
   "include/traccc/fitting/kalman_filter/kalman_step_aborter.hpp"
   "include/traccc/fitting/kalman_filter/statistics_updater.hpp"
+  "include/traccc/fitting/kalman_filter/two_filters_smoother.hpp"
   "include/traccc/fitting/details/fit_tracks.hpp"
   "include/traccc/fitting/kalman_fitting_algorithm.hpp"
   "src/fitting/kalman_fitting_algorithm.cpp"
@@ -87,7 +91,7 @@ traccc_add_library( traccc_core core TYPE SHARED
   "include/traccc/seeding/detail/seeding_config.hpp"
   "include/traccc/seeding/detail/spacepoint_grid.hpp"
   "include/traccc/seeding/seed_selecting_helper.hpp"
-  "include/traccc/seeding/seed_filtering.hpp"
+  "src/seeding/seed_filtering.hpp"
   "src/seeding/seed_filtering.cpp"
   "include/traccc/seeding/seeding_algorithm.hpp"
   "src/seeding/seeding_algorithm.cpp"
@@ -97,11 +101,11 @@ traccc_add_library( traccc_core core TYPE SHARED
   "include/traccc/seeding/track_params_estimation.hpp"
   "src/seeding/track_params_estimation.cpp"
   "include/traccc/seeding/triplet_finding_helper.hpp"
-  "include/traccc/seeding/doublet_finding.hpp"
-  "include/traccc/seeding/triplet_finding.hpp"
-  "include/traccc/seeding/seed_finding.hpp"
+  "src/seeding/doublet_finding.hpp"
+  "src/seeding/triplet_finding.hpp"
+  "include/traccc/seeding/detail/seed_finding.hpp"
   "src/seeding/seed_finding.cpp"
-  "include/traccc/seeding/spacepoint_binning.hpp"
+  "include/traccc/seeding/detail/spacepoint_binning.hpp"
   "src/seeding/spacepoint_binning.cpp"
   "include/traccc/seeding/detail/spacepoint_formation.hpp"
   "include/traccc/seeding/impl/spacepoint_formation.ipp"
@@ -114,8 +118,8 @@ traccc_add_library( traccc_core core TYPE SHARED
   "include/traccc/ambiguity_resolution/greedy_ambiguity_resolution_algorithm.hpp"
   "src/ambiguity_resolution/greedy_ambiguity_resolution_algorithm.cpp" )
 target_link_libraries( traccc_core
-  PUBLIC Eigen3::Eigen vecmem::core detray::core detray::detectors traccc::Thrust
-         traccc::algebra )
+  PUBLIC Eigen3::Eigen vecmem::core detray::core detray::detectors
+         traccc::algebra ActsCore )
 
 # Prevent Eigen from getting confused when building code for a
 # CUDA or HIP backend with SYCL.

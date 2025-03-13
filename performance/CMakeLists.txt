@@ -1,6 +1,6 @@
 # TRACCC library, part of the ACTS project (R&D line)
 #
-# (c) 2022-2023 CERN for the benefit of the ACTS project
+# (c) 2022-2025 CERN for the benefit of the ACTS project
 #
 # Mozilla Public License Version 2.0
 
@@ -36,7 +36,7 @@ traccc_add_library( traccc_performance performance TYPE SHARED
    "include/traccc/utils/ranges.hpp"
    "include/traccc/utils/helpers.hpp"
    "src/utils/helpers.hpp"
-   "src/utils/helpers.cpp"  
+   "src/utils/helpers.cpp"
    # Value/object comparison code.
    "include/traccc/performance/details/is_same_angle.hpp"
    "src/performance/details/is_same_angle.cpp"
@@ -44,6 +44,8 @@ traccc_add_library( traccc_performance performance TYPE SHARED
    "src/performance/details/is_same_scalar.cpp"
    "include/traccc/performance/details/is_same_object.hpp"
    "include/traccc/performance/impl/is_same_object.ipp"
+   "include/traccc/performance/impl/is_same_finding_result.ipp"
+   "include/traccc/performance/impl/is_same_fitting_result.ipp"
    "include/traccc/performance/impl/is_same_seed.ipp"
    "include/traccc/performance/impl/is_same_measurement.ipp"
    "include/traccc/performance/impl/is_same_spacepoint.ipp"
@@ -52,12 +54,13 @@ traccc_add_library( traccc_performance performance TYPE SHARED
    "include/traccc/performance/details/comparator_factory.hpp"
    "include/traccc/performance/impl/comparator_factory.ipp"
    "include/traccc/performance/impl/seed_comparator_factory.ipp"
-   "src/performance/details/comparator_factory.cpp"
    # Collection/container comparison code.
    "include/traccc/performance/collection_comparator.hpp"
    "include/traccc/performance/impl/collection_comparator.ipp"
    "include/traccc/performance/container_comparator.hpp"
    "include/traccc/performance/impl/container_comparator.ipp"
+   "include/traccc/performance/soa_comparator.hpp"
+   "include/traccc/performance/impl/soa_comparator.ipp"
    # Performance time measurement code.
    "include/traccc/performance/timer.hpp"
    "src/performance/timer.cpp"
@@ -66,7 +69,8 @@ traccc_add_library( traccc_performance performance TYPE SHARED
    "include/traccc/performance/throughput.hpp"
    "src/performance/throughput.cpp" )
 target_link_libraries( traccc_performance
-   PUBLIC traccc::core traccc::io covfie::core detray::test_utils )
+   PUBLIC traccc::core traccc::io covfie::core detray::test_utils
+   PRIVATE indicators::indicators )
 
 # Use ROOT in traccc::performance, if requested.
 if( TRACCC_USE_ROOT )

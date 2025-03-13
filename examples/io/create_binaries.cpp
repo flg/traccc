@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022-2024 CERN for the benefit of the ACTS project
+ * (c) 2022-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -24,7 +24,8 @@
 
 int create_binaries(const traccc::opts::detector& detector_opts,
                     const traccc::opts::input_data& input_opts,
-                    const traccc::opts::output_data& output_opts) {
+                    const traccc::opts::output_data& output_opts,
+                    std::unique_ptr<const traccc::Logger> logger) {
 
     // Memory resource used by the EDM.
     vecmem::host_memory_resource host_mr;
@@ -42,32 +43,24 @@ int create_binaries(const traccc::opts::detector& detector_opts,
 
         // Read the cells from the relevant event file
         traccc::edm::silicon_cell_collection::host cells{host_mr};
-        traccc::io::read_cells(cells, event, input_opts.directory, &det_descr,
-                               input_opts.format);
+        traccc::io::read_cells(cells, event, input_opts.directory,
+                               logger->clone(), &det_descr, input_opts.format);
 
         // Write binary file
         traccc::io::write(event, output_opts.directory,
                           traccc::data_format::binary, vecmem::get_data(cells));
 
-        // Read the hits from the relevant event file
-        traccc::spacepoint_collection_types::host spacepoints{&host_mr};
-        traccc::io::read_spacepoints(spacepoints, event, input_opts.directory,
-                                     nullptr, input_opts.format);
-
-        // Write binary file
-        traccc::io::write(event, output_opts.directory,
-                          traccc::data_format::binary,
-                          vecmem::get_data(spacepoints));
-
-        // Read the measurements from the relevant event file
+        // Read the measurements and hits from the relevant event file
         traccc::measurement_collection_types::host measurements{&host_mr};
-        traccc::io::read_measurements(measurements, event, input_opts.directory,
-                                      nullptr, input_opts.format);
+        traccc::edm::spacepoint_collection::host spacepoints{host_mr};
+        traccc::io::read_spacepoints(spacepoints, measurements, event,
+                                     input_opts.directory, nullptr,
+                                     input_opts.format);
 
-        // Write binary file
-        traccc::io::write(event, output_opts.directory,
-                          traccc::data_format::binary,
-                          vecmem::get_data(measurements));
+        // Write binary file(s)
+        traccc::io::write(
+            event, output_opts.directory, traccc::data_format::binary,
+            vecmem::get_data(spacepoints), vecmem::get_data(measurements));
     }
 
     return EXIT_SUCCESS;
@@ -76,6 +69,8 @@ int create_binaries(const traccc::opts::detector& detector_opts,
 // The main routine
 //
 int main(int argc, char* argv[]) {
+    std::unique_ptr<const traccc::Logger> logger = traccc::getDefaultLogger(
+        "TracccExampleCreateBinaries", traccc::Logging::Level::INFO);
 
     // Program options.
     traccc::opts::detector detector_opts;
@@ -85,8 +80,10 @@ int main(int argc, char* argv[]) {
         "Binary File Creation",
         {detector_opts, input_opts, output_opts},
         argc,
-        argv};
+        argv,
+        logger->cloneWithSuffix("Options")};
 
     // Run the application.
-    return create_binaries(detector_opts, input_opts, output_opts);
+    return create_binaries(detector_opts, input_opts, output_opts,
+                           logger->clone());
 }

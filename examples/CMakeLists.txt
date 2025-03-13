@@ -7,7 +7,9 @@
 # Project include(s).
 include( traccc-compiler-options-cpp )
 
+add_subdirectory(utils)
 add_subdirectory(options)
 add_subdirectory(run)
 add_subdirectory(io)
 add_subdirectory(simulation)
+add_subdirectory(tools)

@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023-2024 CERN for the benefit of the ACTS project
+ * (c) 2023-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -8,8 +8,10 @@
 // Project include(s).
 #include "traccc/options/detector.hpp"
 
+#include "traccc/examples/utils/printable.hpp"
+
 // System include(s).
-#include <iostream>
+#include <format>
 
 namespace traccc::opts {
 
@@ -28,24 +30,31 @@ detector::detector() : interface("Detector Options") {
     m_desc.add_options()("grid-file",
                          po::value(&grid_file)->default_value(grid_file),
                          "Surface grid file");
-    m_desc.add_options()("use-detray-detector",
-                         po::bool_switch(&use_detray_detector),
-                         "Use detray::detector for the geometry handling");
+    m_desc.add_options()(
+        "use-detray-detector",
+        po::value(&use_detray_detector)->default_value(use_detray_detector),
+        "Use detray::detector for the geometry handling");
     m_desc.add_options()(
         "digitization-file",
         po::value(&digitization_file)->default_value(digitization_file),
         "Digitization file");
 }
 
-std::ostream& detector::print_impl(std::ostream& out) const {
+std::unique_ptr<configuration_printable> detector::as_printable() const {
+    auto cat = std::make_unique<configuration_category>(m_description);
 
-    out << "  Detector file       : " << detector_file << "\n"
-        << "  Material file       : " << material_file << "\n"
-        << "  Surface grid file   : " << grid_file << "\n"
-        << "  Use detray::detector: " << (use_detray_detector ? "yes" : "no")
-        << "\n"
-        << "  Digitization file   : " << digitization_file;
-    return out;
+    cat->add_child(std::make_unique<configuration_kv_pair>("Detector file",
+                                                           detector_file));
+    cat->add_child(std::make_unique<configuration_kv_pair>("Material file",
+                                                           material_file));
+    cat->add_child(std::make_unique<configuration_kv_pair>("Surface grid file",
+                                                           grid_file));
+    cat->add_child(std::make_unique<configuration_kv_pair>(
+        "Use detray detector", std::format("{}", use_detray_detector)));
+    cat->add_child(std::make_unique<configuration_kv_pair>("Digitization file",
+                                                           digitization_file));
+
+    return cat;
 }
 
 }  // namespace traccc::opts

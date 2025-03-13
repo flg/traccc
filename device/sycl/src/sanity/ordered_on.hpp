@@ -18,7 +18,7 @@
 #include <vecmem/utils/copy.hpp>
 
 // SYCL include
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 // System include
 #include <concepts>
@@ -40,7 +40,7 @@ struct is_ordered_on {
         : m_relation(relation), m_view(view), m_out(out) {}
 
     /// Execution operator for the kernel
-    void operator()(cl::sycl::nd_item<1> item) const {
+    void operator()(::sycl::nd_item<1> item) const {
 
         std::size_t tid = item.get_global_linear_id();
 
@@ -92,13 +92,11 @@ template <typename CONTAINER, std::semiregular R, typename VIEW>
 requires std::regular_invocable<R, decltype(std::declval<CONTAINER>().at(0)),
                                 decltype(std::declval<CONTAINER>().at(0))> bool
 is_ordered_on(R&& relation, vecmem::memory_resource& mr, vecmem::copy& copy,
-              queue_wrapper& queue_wrapper, const VIEW& view) {
+              ::sycl::queue& queue, const VIEW& view) {
 
     // This should never be a performance-critical step, so we can keep the
     // block size fixed.
     constexpr int block_size = 512;
-
-    cl::sycl::queue& queue = details::get_queue(queue_wrapper);
 
     // Grab the number of elements in our container.
     const typename VIEW::size_type n = copy.get_size(view);
@@ -112,14 +110,14 @@ is_ordered_on(R&& relation, vecmem::memory_resource& mr, vecmem::copy& copy,
     vecmem::unique_alloc_ptr<bool> out = vecmem::make_unique_alloc<bool>(mr);
     bool initial_out = true;
 
-    cl::sycl::event kernel1_memcpy1 =
+    ::sycl::event kernel1_memcpy1 =
         queue.memcpy(out.get(), &initial_out, sizeof(bool));
 
-    cl::sycl::nd_range<1> kernel_range{
-        cl::sycl::range<1>(((n + block_size - 1) / block_size) * block_size),
-        cl::sycl::range<1>(block_size)};
+    ::sycl::nd_range<1> kernel_range{
+        ::sycl::range<1>(((n + block_size - 1) / block_size) * block_size),
+        ::sycl::range<1>(block_size)};
 
-    cl::sycl::event kernel1 = queue.submit([&](cl::sycl::handler& h) {
+    ::sycl::event kernel1 = queue.submit([&](::sycl::handler& h) {
         h.depends_on(kernel1_memcpy1);
         h.parallel_for<kernels::is_ordered_on<CONTAINER, R, VIEW>>(
             kernel_range, kernels::is_ordered_on<CONTAINER, R, VIEW>(

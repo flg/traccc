@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2024 CERN for the benefit of the ACTS project
+ * (c) 2024-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -8,8 +8,10 @@
 // Local include(s).
 #include "traccc/options/output_data.hpp"
 
+#include "traccc/examples/utils/printable.hpp"
+
 // System include(s).
-#include <iostream>
+#include <sstream>
 #include <stdexcept>
 
 namespace traccc::opts {
@@ -53,11 +55,17 @@ void output_data::read(const boost::program_options::variables_map& vm) {
     }
 }
 
-std::ostream& output_data::print_impl(std::ostream& out) const {
+std::unique_ptr<configuration_printable> output_data::as_printable() const {
+    auto cat = std::make_unique<configuration_category>(m_description);
 
-    out << "  Output data format: " << format << "\n"
-        << "  Output directory  : " << directory;
-    return out;
+    std::ostringstream format_ss;
+    format_ss << format;
+    cat->add_child(std::make_unique<configuration_kv_pair>("Output data format",
+                                                           format_ss.str()));
+    cat->add_child(
+        std::make_unique<configuration_kv_pair>("Output directory", directory));
+
+    return cat;
 }
 
 }  // namespace traccc::opts

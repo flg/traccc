@@ -9,7 +9,7 @@
 #include "res_plot_tool.hpp"
 
 // Detray include(s).
-#include "detray/test/utils/statistics.hpp"
+#include <detray/test/utils/statistics.hpp>
 
 // ROOT include(s).
 #ifdef TRACCC_HAVE_ROOT
@@ -95,12 +95,12 @@ void res_plot_tool::book(res_plot_cache& cache) const {
 }
 
 void res_plot_tool::fill(res_plot_cache& cache,
-                         const bound_track_parameters& truth_param,
-                         const bound_track_parameters& fit_param,
+                         const bound_track_parameters<>& truth_param,
+                         const bound_track_parameters<>& fit_param,
                          const particle& ptc) const {
 
     // Find index of eta and pT for resolution histogram
-    const scalar eta = getter::eta(ptc.momentum);
+    const scalar eta = vector::eta(ptc.momentum);
     const scalar pT = std::hypot(ptc.momentum[0], ptc.momentum[1]);
 
     // Avoid unused variable warnings when building the code without ROOT.

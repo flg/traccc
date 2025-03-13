@@ -8,6 +8,7 @@
 // Project include(s).
 #include "traccc/definitions/primitives.hpp"
 #include "traccc/edm/track_parameters.hpp"
+#include "traccc/geometry/detector.hpp"
 #include "traccc/io/utils.hpp"
 #include "traccc/options/generation.hpp"
 #include "traccc/options/output_data.hpp"
@@ -18,10 +19,10 @@
 #include "traccc/simulation/smearing_writer.hpp"
 
 // detray include(s).
-#include "detray/detectors/bfield.hpp"
-#include "detray/io/frontend/detector_writer.hpp"
-#include "detray/test/utils/detectors/build_toy_detector.hpp"
-#include "detray/test/utils/simulation/event_generator/track_generators.hpp"
+#include <detray/detectors/bfield.hpp>
+#include <detray/io/frontend/detector_writer.hpp>
+#include <detray/test/utils/detectors/build_toy_detector.hpp>
+#include <detray/test/utils/simulation/event_generator/track_generators.hpp>
 
 // VecMem include(s).
 #include <vecmem/memory/host_memory_resource.hpp>
@@ -48,20 +49,21 @@ int simulate(const traccc::opts::generation& generation_opts,
      *****************************/
 
     // Detector type
-    using detector_type = detray::detector<detray::toy_metadata>;
+    using detector_type = traccc::toy_detector::host;
 
     // B field value and its type
     // @TODO: Set B field as argument
-    using b_field_t = covfie::field<detray::bfield::const_bknd_t>;
-    const vector3 B{0, 0, 2 * detray::unit<scalar>::T};
-    auto field = detray::bfield::create_const_field(B);
+    using b_field_t = covfie::field<detray::bfield::const_bknd_t<scalar>>;
+    const vector3 B{0, 0, 2 * traccc::unit<scalar>::T};
+    auto field = detray::bfield::create_const_field<scalar>(B);
 
     // Create the toy geometry
-    detray::toy_det_config toy_cfg{};
+    detray::toy_det_config<scalar> toy_cfg{};
     toy_cfg.n_brl_layers(4u).n_edc_layers(7u);
     // @TODO: Increase the material budget again
-    toy_cfg.module_mat_thickness(0.11f * detray::unit<scalar>::mm);
-    const auto [det, name_map] = detray::build_toy_detector(host_mr, toy_cfg);
+    toy_cfg.module_mat_thickness(0.11f * traccc::unit<scalar>::mm);
+    const auto [det, name_map] =
+        detray::build_toy_detector<traccc::default_algebra>(host_mr, toy_cfg);
 
     /***************************
      * Generate simulation data
@@ -69,7 +71,7 @@ int simulate(const traccc::opts::generation& generation_opts,
 
     // Origin of particles
     using generator_type =
-        detray::random_track_generator<traccc::free_track_parameters,
+        detray::random_track_generator<traccc::free_track_parameters<>,
                                        uniform_gen_t>;
     generator_type::configuration gen_cfg{};
     gen_cfg.n_tracks(generation_opts.gen_nparticles);
@@ -86,7 +88,7 @@ int simulate(const traccc::opts::generation& generation_opts,
 
     // Smearing value for measurements
     traccc::measurement_smearer<traccc::default_algebra> meas_smearer(
-        50 * detray::unit<scalar>::um, 50 * detray::unit<scalar>::um);
+        50 * traccc::unit<scalar>::um, 50 * traccc::unit<scalar>::um);
 
     // Type declarations
     using writer_type = traccc::smearing_writer<
@@ -120,6 +122,8 @@ int simulate(const traccc::opts::generation& generation_opts,
 // The main routine
 //
 int main(int argc, char* argv[]) {
+    std::unique_ptr<const traccc::Logger> logger = traccc::getDefaultLogger(
+        "TracccExampleSimulateToyDetector", traccc::Logging::Level::INFO);
 
     // Program options.
     traccc::opts::generation generation_opts;
@@ -129,7 +133,8 @@ int main(int argc, char* argv[]) {
         "Toy-Detector Simulation",
         {generation_opts, output_opts, propagation_opts},
         argc,
-        argv};
+        argv,
+        logger->cloneWithSuffix("Options")};
 
     // Run the application.
     return simulate(generation_opts, output_opts, propagation_opts);

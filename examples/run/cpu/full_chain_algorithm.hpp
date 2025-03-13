@@ -19,13 +19,14 @@
 #include "traccc/seeding/silicon_pixel_spacepoint_formation_algorithm.hpp"
 #include "traccc/seeding/track_params_estimation.hpp"
 #include "traccc/utils/algorithm.hpp"
+#include "traccc/utils/messaging.hpp"
 
 // Detray include(s).
-#include "detray/core/detector.hpp"
-#include "detray/detectors/bfield.hpp"
-#include "detray/navigation/navigator.hpp"
-#include "detray/propagator/propagator.hpp"
-#include "detray/propagator/rk_stepper.hpp"
+#include <detray/core/detector.hpp>
+#include <detray/detectors/bfield.hpp>
+#include <detray/navigation/navigator.hpp>
+#include <detray/propagator/propagator.hpp>
+#include <detray/propagator/rk_stepper.hpp>
 
 // VecMem include(s).
 #include <vecmem/memory/memory_resource.hpp>
@@ -40,7 +41,8 @@ namespace traccc {
 /// At least as much as is implemented in the project at any given moment.
 ///
 class full_chain_algorithm : public algorithm<track_state_container_types::host(
-                                 const edm::silicon_cell_collection::host&)> {
+                                 const edm::silicon_cell_collection::host&)>,
+                             public messaging {
 
     public:
     /// @name Type declaration(s)
@@ -77,7 +79,8 @@ class full_chain_algorithm : public algorithm<track_state_container_types::host(
                          const finding_algorithm::config_type& finding_config,
                          const fitting_algorithm::config_type& fitting_config,
                          const silicon_detector_description::host& det_descr,
-                         detector_type* detector = nullptr);
+                         detector_type* detector,
+                         std::unique_ptr<const traccc::Logger> logger);
 
     /// Reconstruct track parameters in the entire detector
     ///
@@ -91,7 +94,7 @@ class full_chain_algorithm : public algorithm<track_state_container_types::host(
     /// Constant B field for the (seed) track parameter estimation
     traccc::vector3 m_field_vec;
     /// Constant B field for the track finding and fitting
-    detray::bfield::const_field_t m_field;
+    detray::bfield::const_field_t<typename detector_type::scalar_type> m_field;
 
     /// Detector description
     std::reference_wrapper<const silicon_detector_description::host>
@@ -107,9 +110,9 @@ class full_chain_algorithm : public algorithm<track_state_container_types::host(
     /// Spacepoint formation algorithm
     spacepoint_formation_algorithm m_spacepoint_formation;
     /// Seeding algorithm
-    seeding_algorithm m_seeding;
+    host::seeding_algorithm m_seeding;
     /// Track parameter estimation algorithm
-    track_params_estimation m_track_parameter_estimation;
+    host::track_params_estimation m_track_parameter_estimation;
 
     /// Track finding algorithm
     finding_algorithm m_finding;
@@ -134,7 +137,6 @@ class full_chain_algorithm : public algorithm<track_state_container_types::host(
     fitting_algorithm::config_type m_fitting_config;
 
     /// @}
-
 };  // class full_chain_algorithm
 
 }  // namespace traccc

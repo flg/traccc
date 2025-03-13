@@ -30,18 +30,28 @@ struct statistics_updater {
     TRACCC_HOST_DEVICE inline void operator()(
         const mask_group_t& /*mask_group*/, const index_t& /*index*/,
         fitting_result<algebra_t>& fit_res,
-        const track_state<algebra_t>& trk_state) {
+        const track_state<algebra_t>& trk_state,
+        const bool use_backward_filter) {
 
         if (!trk_state.is_hole) {
 
             // Measurement dimension
             const unsigned int D = trk_state.get_measurement().meas_dim;
 
-            // NDoF = NDoF + number of coordinates per measurement
-            fit_res.ndf += static_cast<scalar_type>(D);
+            // Track quality
+            auto& trk_quality = fit_res.trk_quality;
 
-            // total_chi2 = total_chi2 + chi2
-            fit_res.chi2 += trk_state.smoothed_chi2();
+            if (use_backward_filter) {
+                if (trk_state.is_smoothed) {
+                    // NDoF = NDoF + number of coordinates per measurement
+                    trk_quality.ndf += static_cast<scalar_type>(D);
+                    trk_quality.chi2 += trk_state.backward_chi2();
+                }
+            } else {
+                // NDoF = NDoF + number of coordinates per measurement
+                trk_quality.ndf += static_cast<scalar_type>(D);
+                trk_quality.chi2 += trk_state.filtered_chi2();
+            }
         }
     }
 };

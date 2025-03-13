@@ -1,11 +1,14 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022-2024 CERN for the benefit of the ACTS project
+ * (c) 2022-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
 
 #pragma once
+
+// Project include(s)
+#include "traccc/geometry/detector.hpp"
 
 // Command line option include(s).
 #include "traccc/options/clusterization.hpp"
@@ -14,6 +17,7 @@
 #include "traccc/options/program_options.hpp"
 #include "traccc/options/throughput.hpp"
 #include "traccc/options/track_finding.hpp"
+#include "traccc/options/track_fitting.hpp"
 #include "traccc/options/track_propagation.hpp"
 #include "traccc/options/track_seeding.hpp"
 
@@ -45,6 +49,8 @@ namespace traccc {
 template <typename FULL_CHAIN_ALG, typename HOST_MR>
 int throughput_st(std::string_view description, int argc, char* argv[],
                   bool use_host_caching) {
+    std::unique_ptr<const traccc::Logger> logger = traccc::getDefaultLogger(
+        "ThroughputExample", traccc::Logging::Level::INFO);
 
     // Program options.
     opts::detector detector_opts;
@@ -53,13 +59,15 @@ int throughput_st(std::string_view description, int argc, char* argv[],
     opts::track_seeding seeding_opts;
     opts::track_finding finding_opts;
     opts::track_propagation propagation_opts;
+    opts::track_fitting fitting_opts;
     opts::throughput throughput_opts;
     opts::program_options program_opts{
         description,
         {detector_opts, input_opts, clusterization_opts, seeding_opts,
-         finding_opts, propagation_opts, throughput_opts},
+         finding_opts, propagation_opts, fitting_opts, throughput_opts},
         argc,
-        argv};
+        argv,
+        logger->cloneWithSuffix("Options")};
 
     // Set up the timing info holder.
     performance::timing_info times;
@@ -99,9 +107,9 @@ int throughput_st(std::string_view description, int argc, char* argv[],
              i < input_opts.skip + input_opts.events; ++i) {
             input.push_back({uncached_host_mr});
             static constexpr bool DEDUPLICATE = true;
-            io::read_cells(input.back(), i, input_opts.directory, &det_descr,
-                           input_opts.format, DEDUPLICATE,
-                           input_opts.use_acts_geom_source);
+            io::read_cells(input.back(), i, input_opts.directory,
+                           logger->clone(), &det_descr, input_opts.format,
+                           DEDUPLICATE, input_opts.use_acts_geom_source);
         }
     }
 
@@ -115,7 +123,8 @@ int throughput_st(std::string_view description, int argc, char* argv[],
         finding_opts);
     finding_cfg.propagation = propagation_config;
 
-    typename FULL_CHAIN_ALG::fitting_algorithm::config_type fitting_cfg;
+    typename FULL_CHAIN_ALG::fitting_algorithm::config_type fitting_cfg(
+        fitting_opts);
     fitting_cfg.propagation = propagation_config;
 
     // Set up the full-chain algorithm.
@@ -123,10 +132,15 @@ int throughput_st(std::string_view description, int argc, char* argv[],
         alg_host_mr, clustering_cfg, seeding_opts.seedfinder,
         spacepoint_grid_config{seeding_opts.seedfinder},
         seeding_opts.seedfilter, finding_cfg, fitting_cfg, det_descr,
-        (detector_opts.use_detray_detector ? &detector : nullptr));
+        (detector_opts.use_detray_detector ? &detector : nullptr),
+        logger->clone("FullChainAlg"));
 
     // Seed the random number generator.
-    std::srand(static_cast<unsigned int>(std::time(0)));
+    if (throughput_opts.random_seed == 0) {
+        std::srand(static_cast<unsigned int>(std::time(0)));
+    } else {
+        std::srand(throughput_opts.random_seed);
+    }
 
     // Dummy count uses output of tp algorithm to ensure the compiler
     // optimisations don't skip any step
@@ -151,7 +165,10 @@ int throughput_st(std::string_view description, int argc, char* argv[],
 
             // Choose which event to process.
             const std::size_t event =
-                static_cast<std::size_t>(std::rand()) % input_opts.events;
+                (throughput_opts.deterministic_event_order
+                     ? i
+                     : static_cast<std::size_t>(std::rand())) %
+                input_opts.events;
 
             // Process one event.
             rec_track_params += (*alg)(input[event]).size();
@@ -179,7 +196,10 @@ int throughput_st(std::string_view description, int argc, char* argv[],
 
             // Choose which event to process.
             const std::size_t event =
-                static_cast<std::size_t>(std::rand()) % input_opts.events;
+                (throughput_opts.deterministic_event_order
+                     ? i
+                     : static_cast<std::size_t>(std::rand())) %
+                input_opts.events;
 
             // Process one event.
             rec_track_params += (*alg)(input[event]).size();

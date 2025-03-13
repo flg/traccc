@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022-2024 CERN for the benefit of the ACTS project
+ * (c) 2022-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -8,6 +8,7 @@
 #pragma once
 
 #include <mutex>
+#include <vecmem/memory/device_atomic_ref.hpp>
 
 #include "traccc/clusterization/clustering_config.hpp"
 #include "traccc/clusterization/device/aggregate_cluster.hpp"
@@ -18,7 +19,6 @@
 #include "traccc/device/mutex.hpp"
 #include "traccc/device/unique_lock.hpp"
 #include "traccc/edm/silicon_cell_collection.hpp"
-#include "vecmem/memory/device_atomic_ref.hpp"
 
 namespace traccc::device {
 
@@ -144,7 +144,7 @@ TRACCC_DEVICE inline void ccl_core(
     const edm::silicon_cell_collection::const_device& cells_device,
     const silicon_detector_description::const_device& det_descr,
     measurement_collection_types::device measurements_device,
-    barrier_t& barrier) {
+    const barrier_t& barrier) {
     const auto size =
         static_cast<details::index_t>(partition_end - partition_start);
 
@@ -224,7 +224,7 @@ TRACCC_DEVICE inline void ccl_kernel(
     vecmem::data::vector_view<details::index_t> gf_backup_view,
     vecmem::data::vector_view<unsigned char> adjc_backup_view,
     vecmem::data::vector_view<details::index_t> adjv_backup_view,
-    vecmem::device_atomic_ref<uint32_t> backup_mutex, barrier_t& barrier,
+    vecmem::device_atomic_ref<uint32_t> backup_mutex, const barrier_t& barrier,
     measurement_collection_types::view measurements_view,
     vecmem::data::vector_view<unsigned int> cell_links) {
 
@@ -254,8 +254,7 @@ TRACCC_DEVICE inline void ccl_kernel(
      */
     if (thread_id.getLocalThreadIdX() == 0) {
         unsigned int start =
-            static_cast<unsigned int>(thread_id.getBlockIdX()) *
-            cfg.target_partition_size();
+            thread_id.getBlockIdX() * cfg.target_partition_size();
         assert(start < num_cells);
         unsigned int end =
             std::min(num_cells, start + cfg.target_partition_size());

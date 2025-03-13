@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023 CERN for the benefit of the ACTS project
+ * (c) 2023-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -12,9 +12,9 @@
 #include "traccc/utils/subspace.hpp"
 
 // Detray include(s).
-#include "detray/geometry/shapes/annulus2D.hpp"
-#include "detray/geometry/shapes/line.hpp"
-#include "detray/tracks/bound_track_parameters.hpp"
+#include <detray/geometry/shapes/annulus2D.hpp>
+#include <detray/geometry/shapes/line.hpp>
+#include <detray/tracks/bound_track_parameters.hpp>
 
 // System include(s).
 #include <array>
@@ -27,7 +27,6 @@ template <typename algebra_t>
 struct measurement_smearer {
 
     using algebra_type = algebra_t;
-    using matrix_operator = detray::dmatrix_operator<algebra_t>;
     using scalar_type = detray::dscalar<algebra_t>;
     template <std::size_t ROWS, std::size_t COLS>
     using matrix_type = detray::dmatrix<algebra_t, ROWS, COLS>;
@@ -36,7 +35,7 @@ struct measurement_smearer {
                         const scalar_type stddev_local1)
         : stddev({stddev_local0, stddev_local1}) {}
 
-    measurement_smearer(measurement_smearer& smearer)
+    measurement_smearer(const measurement_smearer& smearer)
         : stddev(smearer.stddev), generator(smearer.generator) {}
 
     void set_seed(const uint_fast64_t sd) { generator.seed(sd); }
@@ -46,15 +45,18 @@ struct measurement_smearer {
     std::mt19937_64 generator{rd()};
 
     std::array<scalar_type, 2> get_offset() {
-        return {
-            std::normal_distribution<scalar_type>(0.f, stddev[0])(generator),
-            std::normal_distribution<scalar_type>(0.f, stddev[1])(generator)};
+        auto generate_offset = [&gen = generator](const scalar_type sigma) {
+            return sigma == scalar_type{0}
+                       ? 0.f
+                       : std::normal_distribution<scalar_type>(0.f, sigma)(gen);
+        };
+        return {generate_offset(stddev[0]), generate_offset(stddev[1])};
     }
 
     template <typename mask_t>
     void operator()(
         const mask_t& /*mask*/, const std::array<scalar_type, 2>& offset,
-        const detray::bound_track_parameters<algebra_t>& bound_params,
+        const traccc::bound_track_parameters<algebra_t>& bound_params,
         io::csv::measurement& iomeas) {
 
         // Line detector
@@ -96,26 +98,25 @@ struct measurement_smearer {
             if constexpr (std::is_same_v<
                               typename mask_t::local_frame,
                               detray::line2D<traccc::default_algebra>>) {
-                iomeas.local0 = static_cast<float>(
-                    std::max(std::abs(matrix_operator().element(meas, 0u, 0u)) +
-                                 offset[0],
-                             scalar_type(0.f)));
+                iomeas.local0 = static_cast<float>(std::max(
+                    std::abs(getter::element(meas, 0u, 0u)) + offset[0],
+                    scalar_type(0.f)));
             } else if constexpr (std::is_same_v<typename mask_t::shape,
                                                 detray::annulus2D>) {
                 iomeas.local1 = static_cast<float>(
-                    matrix_operator().element(meas, 0u, 0u) + offset[0]);
+                    getter::element(meas, 0u, 0u) + offset[0]);
             } else {
                 iomeas.local0 = static_cast<float>(
-                    matrix_operator().element(meas, 0u, 0u) + offset[0]);
+                    getter::element(meas, 0u, 0u) + offset[0]);
             }
         } else if (meas_dim == 2u) {
             const auto proj = subs.projector<2u>();
             matrix_type<2u, 1u> meas = proj * bound_params.vector();
 
-            iomeas.local0 = static_cast<float>(
-                matrix_operator().element(meas, 0u, 0u) + offset[0]);
-            iomeas.local1 = static_cast<float>(
-                matrix_operator().element(meas, 1u, 0u) + offset[1]);
+            iomeas.local0 =
+                static_cast<float>(getter::element(meas, 0u, 0u) + offset[0]);
+            iomeas.local1 =
+                static_cast<float>(getter::element(meas, 1u, 0u) + offset[1]);
         }
 
         return;

@@ -25,23 +25,23 @@ jobs:
       matrix:
         platform:
           - name: CPU
-            container: ghcr.io/acts-project/ubuntu2404:56
+            container: ghcr.io/acts-project/ubuntu2404:69
             options: --preset host-fp32 -DALGEBRA_PLUGINS_USE_SYSTEM_VC=FALSE
             run_tests: true
           - name: CPU
-            container: ghcr.io/acts-project/ubuntu2404:56
+            container: ghcr.io/acts-project/ubuntu2404:69
             options: --preset host-fp64 -DALGEBRA_PLUGINS_USE_SYSTEM_VC=FALSE
             run_tests: false
           - name: CUDA
-            container: ghcr.io/acts-project/ubuntu2404_cuda:56
+            container: ghcr.io/acts-project/ubuntu2404_cuda:69
             options: --preset cuda-fp32
             run_tests: false
-          - name: SYCL
-            container: ghcr.io/acts-project/ubuntu2404_oneapi:56
-            options: --preset sycl-fp32 -DCMAKE_SYCL_FLAGS="-fsycl -fsycl-targets=spir64"
+          - name: "SYCL Intel"
+            container: ghcr.io/acts-project/ubuntu2404_oneapi:69
+            options: --preset sycl-fp32
             run_tests: true
           - name: KOKKOS
-            container: ghcr.io/acts-project/ubuntu2404:56
+            container: ghcr.io/acts-project/ubuntu2404:69
             options: --preset kokkos-fp32
             run_tests: false
         build:
@@ -50,40 +50,58 @@ jobs:
         include:
           - platform:
               name: CUDA
-              container: ghcr.io/acts-project/ubuntu2404_cuda:56
+              container: ghcr.io/acts-project/ubuntu2404_cuda:69
               options: --preset cuda-fp64
               run_tests: false
             build: Release
           - platform:
-              name: "SYCL"
-              container: ghcr.io/acts-project/ubuntu2404_cuda_oneapi:56
+              name: "SYCL NVIDIA"
+              container: ghcr.io/acts-project/ubuntu2404_cuda_oneapi:69
               options: --preset sycl-fp32
               run_tests: false
             build: Release
           - platform:
-              name: "SYCL"
-              container: ghcr.io/acts-project/ubuntu2404_rocm_oneapi:56
+              name: "SYCL AMD"
+              container: ghcr.io/acts-project/ubuntu2404_rocm_oneapi:69
               options: --preset sycl-fp32
               run_tests: false
             build: Release
           - platform:
-              name: ALPAKA
-              container: ghcr.io/acts-project/ubuntu2404:56
+              name: "ALPAKA_CPU"
+              container: ghcr.io/acts-project/ubuntu2404:69
               options: --preset alpaka-fp32
               run_tests: true
             build: Release
           - platform:
-              name: ALPAKA
-              container: ghcr.io/acts-project/ubuntu2404:56
-              options: --preset alpaka-fp32
+              name: "ALPAKA_CUDA"
+              container: ghcr.io/acts-project/ubuntu2404_cuda:69
+              options: --preset alpaka-fp32 -Dalpaka_ACC_GPU_CUDA_ENABLE=ON -DTRACCC_FAIL_ON_WARNINGS=OFF
               run_tests: false
-            build: Debug
+            build: Release
+          - platform:
+              name: "ALPAKA_HIP_SYCL"
+              container: ghcr.io/acts-project/ubuntu2404_rocm_oneapi:69
+              options: --preset alpaka-fp32 -Dalpaka_ACC_GPU_HIP_ENABLE=ON -DCMAKE_PREFIX_PATH=/opt/rocm/lib/cmake/ -Dalpaka_DISABLE_VENDOR_RNG=ON -DTRACCC_USE_ROOT=OFF -DTRACCC_SETUP_ROCTHRUST=ON -DTRACCC_BUILD_HIP=ON
+              run_tests: false
+            build: Release
+          - platform:
+              name: "ALPAKA_SYCL"
+              container: ghcr.io/acts-project/ubuntu2404_oneapi:69
+              options: --preset alpaka-fp32 -Dalpaka_ACC_CPU_B_SEQ_T_THREADS_ENABLE=OFF -Dalpaka_ACC_SYCL_ENABLE=ON -Dalpaka_SYCL_ONEAPI_GPU=ON -Dalpaka_SYCL_ONEAPI_GPU_DEVICES=spir64
+              run_tests: false
+            build: Release
     # Use BASH as the shell from the images.
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          apt install -y zstd
+          curl --retry 5 --retry-delay 10 --output deps.tar.zst https://acts.web.cern.ch/ACTS/ci/ubuntu-24.04/deps.v6.tar.zst
+          tar -xf deps.tar.zst -C /usr/local --strip-components=1
+          rm deps.tar.zst
       - name: Configure
         run: |
           source ${GITHUB_WORKSPACE}/.github/ci_setup.sh ${{ matrix.platform.name }}

@@ -9,7 +9,7 @@
 #pragma once
 
 // Detray include(s).
-#include "detray/plugins/algebra/smatrix_definitions.hpp"
+#include <detray/plugins/algebra/smatrix_definitions.hpp>
 
 // Algebra Plugins include(s).
 #include <algebra/smatrix_smatrix.hpp>
@@ -22,6 +22,8 @@
 #include <array>
 #include <map>
 #include <tuple>
+
+#define ALGEBRA_PLUGIN detray::smatrix
 
 namespace traccc {
 
@@ -38,8 +40,5 @@ using dmap = std::map<key_type, value_type>;
 
 template <class... types>
 using dtuple = std::tuple<types...>;
-
-namespace getter = algebra::getter;
-namespace vector = algebra::vector;
 
 }  // namespace traccc

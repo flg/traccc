@@ -1,12 +1,12 @@
 # TRACCC library, part of the ACTS project (R&D line)
 #
-# (c) 2021-2024 CERN for the benefit of the ACTS project
+# (c) 2021-2025 CERN for the benefit of the ACTS project
 #
 # Mozilla Public License Version 2.0
 
 # Set up the project.
-cmake_minimum_required( VERSION 3.22 )
-project( traccc VERSION 0.17.0 LANGUAGES CXX )
+cmake_minimum_required( VERSION 3.25 )
+project( traccc VERSION 0.19.0 LANGUAGES CXX )
 
 # Set up the used C++ standard(s).
 set( CMAKE_CXX_STANDARD 20 CACHE STRING "The (host) C++ standard to use" )
@@ -44,6 +44,10 @@ set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( traccc-functions )
 
+# Temporary setting for the traccc::scalar type, until it can be removed.
+set( TRACCC_CUSTOM_SCALARTYPE "float" CACHE STRING
+   "Scalar type to use in the TRACCC code" )
+
 # Flags controlling which parts of traccc to build.
 option( TRACCC_BUILD_CUDA "Build the CUDA sources included in traccc" FALSE )
 option( TRACCC_BUILD_HIP "Build the HIP sources included in traccc" FALSE)
@@ -61,6 +65,7 @@ option( TRACCC_BUILD_EXAMPLES "Build the examples of traccc" TRUE )
 
 # Flags controlling what traccc should use.
 option( TRACCC_USE_SYSTEM_LIBS "Use system libraries be default" FALSE )
+option( TRACCC_USE_SPACK_LIBS "Use pack libraries by default" FALSE )
 option( TRACCC_USE_ROOT "Use ROOT in the build (if needed)" TRUE )
 
 # Check CUDA and SYCL C++ standards
@@ -140,7 +145,7 @@ option( TRACCC_SETUP_EIGEN3
    "Set up the Eigen3 target(s) explicitly" TRUE )
 option( TRACCC_USE_SYSTEM_EIGEN3
    "Pick up an existing installation of Eigen3 from the build environment"
-   ${TRACCC_USE_SYSTEM_LIBS} )
+   $<OR:$<BOOL:${TRACCC_USE_SYSTEM_LIBS}>,$<BOOL:${TRACCC_USE_SPACK_LIBS}>> )
 if( TRACCC_SETUP_EIGEN3 )
    if( TRACCC_USE_SYSTEM_EIGEN3 )
       find_package( Eigen3 REQUIRED )
@@ -154,7 +159,7 @@ option( TRACCC_SETUP_TBB
    "Set up the TBB target(s) explicitly" TRUE )
 option( TRACCC_USE_SYSTEM_TBB
    "Pick up an existing installation of TBB from the build environment"
-   ${TRACCC_USE_SYSTEM_LIBS} )
+   $<OR:$<BOOL:${TRACCC_USE_SYSTEM_LIBS}>,$<BOOL:${TRACCC_USE_SPACK_LIBS}>> )
 if( TRACCC_SETUP_TBB )
    if( TRACCC_USE_SYSTEM_TBB )
       find_package( TBB REQUIRED )
@@ -168,7 +173,7 @@ option( TRACCC_SETUP_THRUST
    "Set up the Thrust target(s) explicitly" TRUE )
 option( TRACCC_USE_SYSTEM_THRUST
    "Pick up an existing installation of Thrust from the build environment"
-   ${TRACCC_USE_SYSTEM_LIBS} )
+   $<OR:$<BOOL:${TRACCC_USE_SYSTEM_LIBS}>,$<BOOL:${TRACCC_USE_SPACK_LIBS}>> )
 if( TRACCC_SETUP_THRUST )
    if( TRACCC_USE_SYSTEM_THRUST )
       find_package( Thrust REQUIRED )
@@ -176,12 +181,6 @@ if( TRACCC_SETUP_THRUST )
       add_subdirectory( extern/cccl )
    endif()
 endif()
-# Set up an IMPORTED library on top of the Thrust library/libraries. One that
-# the TRACCC/Detray code could depend on publicly.
-set( TRACCC_THRUST_OPTIONS "" CACHE STRING
-   "Extra options for configuring how Thrust should be used" )
-mark_as_advanced( TRACCC_THRUST_OPTIONS )
-thrust_create_target( traccc::Thrust ${TRACCC_THRUST_OPTIONS} )
 
 # Set up rocThrust.
 option( TRACCC_SETUP_ROCTHRUST
@@ -208,10 +207,25 @@ option( TRACCC_SETUP_DPL
    "Set up the DPL target(s) explicitly" ${TRACCC_BUILD_SYCL} )
 option( TRACCC_USE_SYSTEM_DPL
    "Pick up an existing installation of DPL from the build environment"
-   ${TRACCC_USE_SYSTEM_LIBS} )
+   $<OR:$<BOOL:${TRACCC_USE_SYSTEM_LIBS}>,$<BOOL:${TRACCC_USE_SPACK_LIBS}>> )
 if( TRACCC_SETUP_DPL )
    if( TRACCC_USE_SYSTEM_DPL )
-      find_package( DPL REQUIRED )
+      # OneDPL determines whether SYCL is supported by asking the C++ compiler
+      # rather than the SYCL compiler, as a dedicated SYCL compiler is a non-
+      # standard traccc idea. To override the default behaviour (i.e. OneDPL
+      # testing the C++ compiler and finding that it does _not_ support SYCL)
+      # we simply override the support flags. This is fragile, as the flags
+      # are internal to OneDPL, but it's the best we can do. Note thr flag was
+      # renamed in https://github.com/uxlfoundation/oneDPL/pull/1949.
+      set(_sycl_support ON)
+      set(SYCL_SUPPORT ON)
+      find_package( oneDPL REQUIRED )
+      # OneDPL attaches the `-fsycl` flag to the C++ compiler, which causes
+      # it to incorrectly trigger some preprocessor definitions, thereby
+      # loading SYCL-specific header files which do not exist for e.g. a
+      # generic clang installation. Therefore, we have to manually wipe the
+      # compile flags that OneDPL sets.
+      set_target_properties(oneDPL PROPERTIES INTERFACE_COMPILE_OPTIONS "")
    else()
       add_subdirectory( extern/dpl )
    endif()
@@ -222,10 +236,16 @@ option( TRACCC_SETUP_KOKKOS
    "Set up the Kokkos library" ${TRACCC_BUILD_KOKKOS} )
 option( TRACCC_USE_SYSTEM_KOKKOS
    "Pick up an existing installation of Kokkos from the build environment"
-   ${TRACCC_USE_SYSTEM_LIBS} )
+   $<OR:$<BOOL:${TRACCC_USE_SYSTEM_LIBS}>,$<BOOL:${TRACCC_USE_SPACK_LIBS}>> )
 if( TRACCC_SETUP_KOKKOS )
    if( TRACCC_USE_SYSTEM_KOKKOS )
       find_package( Kokkos REQUIRED )
+      # Kokkos likes to determine the host architecture at installation time
+      # and propagate the corresponding `-march` flag through the CMake
+      # configuration which cases compiler errors when we use e.g. ICPX which
+      # dislikes it when you set two different microarchitectures (traccc sets
+      # a generic x86 target).
+      set_target_properties(Kokkos::kokkoscore PROPERTIES INTERFACE_COMPILE_OPTIONS "")
    else()
       add_subdirectory( extern/kokkos )
    endif()
@@ -236,12 +256,11 @@ option( TRACCC_SETUP_ALPAKA
    "Set up the Alpaka library" ${TRACCC_BUILD_ALPAKA})
 option( TRACCC_USE_SYSTEM_ALPAKA
    "Pick up an existing installation of Alpaka from the build environment"
-   ${TRACCC_USE_SYSTEM_LIBS} )
+   $<OR:$<BOOL:${TRACCC_USE_SYSTEM_LIBS}>,$<BOOL:${TRACCC_USE_SPACK_LIBS}>> )
 if( TRACCC_SETUP_ALPAKA )
    # Default options for the Alpaka build.
    set( alpaka_ACC_CPU_B_SEQ_T_THREADS_ENABLE TRUE CACHE BOOL
       "Enable the serial backend of Alpaka" )
-
    if( TRACCC_USE_SYSTEM_ALPAKA )
       find_package( alpaka REQUIRED )
    else()
@@ -310,7 +329,7 @@ option( TRACCC_SETUP_ACTS
    "Set up the Acts target(s) explicitly" TRUE )
 option( TRACCC_USE_SYSTEM_ACTS
    "Pick up an existing installation of Acts from the build environment"
-   ${TRACCC_USE_SYSTEM_LIBS} )
+   $<OR:$<BOOL:${TRACCC_USE_SYSTEM_LIBS}>,$<BOOL:${TRACCC_USE_SPACK_LIBS}>> )
 if( TRACCC_SETUP_ACTS )
    if( TRACCC_USE_SYSTEM_ACTS )
       find_package( Acts REQUIRED COMPONENTS PluginJson )
@@ -328,7 +347,7 @@ option( TRACCC_SETUP_GOOGLETEST
    "Set up the GoogleTest target(s) explicitly" ${TRACCC_DEFAULT_SETUP_GOOGLETEST} )
 option( TRACCC_USE_SYSTEM_GOOGLETEST
    "Pick up an existing installation of GoogleTest from the build environment"
-   ${TRACCC_USE_SYSTEM_LIBS} )
+   $<OR:$<BOOL:${TRACCC_USE_SYSTEM_LIBS}>,$<BOOL:${TRACCC_USE_SPACK_LIBS}>> )
 if( TRACCC_SETUP_GOOGLETEST )
    if( TRACCC_USE_SYSTEM_GOOGLETEST )
       find_package( GTest REQUIRED )
@@ -342,7 +361,7 @@ option( TRACCC_SETUP_BENCHMARKS
    "Set up the Google Benchmark target(s) explicitly" TRUE )
 option( TRACCC_USE_SYSTEM_BENCHMARKS
    "Pick up an existing installation of Google Benchmark from the build environment"
-   ${TRACCC_USE_SYSTEM_LIBS} )
+   $<OR:$<BOOL:${TRACCC_USE_SYSTEM_LIBS}>,$<BOOL:${TRACCC_USE_SPACK_LIBS}>> )
 if( TRACCC_SETUP_BENCHMARKS )
    if( TRACCC_USE_SYSTEM_BENCHMARKS )
       find_package( benchmark REQUIRED )
@@ -352,11 +371,16 @@ if( TRACCC_SETUP_BENCHMARKS )
 endif()
 
 # Set up indicators.
+set( _indicatorsDefault FALSE )
+if( TRACCC_BUILD_EXAMPLES OR TRACCC_BUILD_IO )
+   set( _indicatorsDefault TRUE )
+endif()
 option( TRACCC_SETUP_INDICATORS
-   "Set up the indicators target(s) explicitly" ${TRACCC_BUILD_EXAMPLES} )
+   "Set up the indicators target(s) explicitly" ${_indicatorsDefault} )
+unset( _indicatorsDefault )
 option( TRACCC_USE_SYSTEM_INDICATORS
    "Pick up an existing installation of indicators from the build environment"
-   ${TRACCC_USE_SYSTEM_LIBS} )
+   $<OR:$<BOOL:${TRACCC_USE_SYSTEM_LIBS}>,$<BOOL:${TRACCC_USE_SPACK_LIBS}>> )
 if( TRACCC_SETUP_INDICATORS )
    if( TRACCC_USE_SYSTEM_INDICATORS )
       find_package( indicators REQUIRED )

@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023-2024 CERN for the benefit of the ACTS project
+ * (c) 2023-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -8,19 +8,20 @@
 #pragma once
 
 // Local include(s).
+#include "../utils/calculate1DimNdRange.hpp"
 #include "../utils/get_queue.hpp"
-#include "traccc/sycl/utils/calculate1DimNdRange.hpp"
+#include "../utils/global_index.hpp"
 
 // Project include(s).
 #include "traccc/edm/measurement.hpp"
-#include "traccc/edm/spacepoint.hpp"
+#include "traccc/edm/spacepoint_collection.hpp"
 #include "traccc/seeding/device/form_spacepoints.hpp"
 
 // VecMem include(s).
 #include <vecmem/memory/memory_resource.hpp>
 
 // SYCL include(s).
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 namespace traccc::sycl::details {
 
@@ -37,10 +38,10 @@ namespace traccc::sycl::details {
 /// @return A buffer of the created spacepoints
 ///
 template <typename detector_t>
-spacepoint_collection_types::buffer silicon_pixel_spacepoint_formation(
+edm::spacepoint_collection::buffer silicon_pixel_spacepoint_formation(
     const typename detector_t::view_type& det_view,
     const measurement_collection_types::const_view& measurements_view,
-    vecmem::memory_resource& mr, vecmem::copy& copy, cl::sycl::queue& queue) {
+    vecmem::memory_resource& mr, vecmem::copy& copy, ::sycl::queue& queue) {
 
     // Get the number of measurements.
     const measurement_collection_types::const_view::size_type n_measurements =
@@ -50,7 +51,7 @@ spacepoint_collection_types::buffer silicon_pixel_spacepoint_formation(
     }
 
     // Create the result buffer.
-    spacepoint_collection_types::buffer result(
+    edm::spacepoint_collection::buffer result(
         n_measurements, mr, vecmem::data::buffer_type::resizable);
     vecmem::copy::event_type spacepoints_setup_event = copy.setup(result);
 
@@ -63,15 +64,14 @@ spacepoint_collection_types::buffer silicon_pixel_spacepoint_formation(
 
     // Run the spacepoint formation on the device.
     queue
-        .submit([&](cl::sycl::handler& h) {
-            h.parallel_for(
-                countRange, [det_view, measurements_view, n_measurements,
-                             spacepoints_view = vecmem::get_data(result)](
-                                cl::sycl::nd_item<1> item) {
-                    device::form_spacepoints<detector_t>(
-                        item.get_global_linear_id(), det_view,
-                        measurements_view, n_measurements, spacepoints_view);
-                });
+        .submit([&](::sycl::handler& h) {
+            h.parallel_for(countRange, [det_view, measurements_view,
+                                        spacepoints_view = vecmem::get_data(
+                                            result)](::sycl::nd_item<1> item) {
+                device::form_spacepoints<detector_t>(
+                    details::global_index(item), det_view, measurements_view,
+                    spacepoints_view);
+            });
         })
         .wait_and_throw();
 

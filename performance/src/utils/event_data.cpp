@@ -21,7 +21,7 @@
 #include "traccc/utils/particle.hpp"
 
 // Detray include(s).
-#include "detray/io/frontend/detector_reader.hpp"
+#include <detray/io/frontend/detector_reader.hpp>
 
 // System include(s).
 #include <filesystem>
@@ -314,8 +314,8 @@ track_candidate_container_types::host event_data::generate_truth_candidates(
     for (auto const& [ptc, measurements] : m_ptc_to_meas_map) {
 
         const auto& param = m_meas_to_param_map.at(measurements[0]);
-        const free_track_parameters free_param(param.first, 0.f, param.second,
-                                               ptc.charge);
+        const free_track_parameters<> free_param(param.first, 0.f, param.second,
+                                                 ptc.charge);
 
         auto seed_params =
             sg(measurements[0].surface_link, free_param,
@@ -329,8 +329,10 @@ track_candidate_container_types::host event_data::generate_truth_candidates(
             candidates.push_back(meas);
         }
 
-        track_candidates.push_back(std::move(seed_params),
-                                   std::move(candidates));
+        // Track quality set empty
+        track_candidates.push_back(
+            finding_result{seed_params, track_quality{0.f, 0.f, 0u}},
+            std::move(candidates));
     }
 
     return track_candidates;

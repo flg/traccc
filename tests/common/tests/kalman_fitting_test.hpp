@@ -10,16 +10,15 @@
 // Project include(s).
 #include "traccc/definitions/common.hpp"
 #include "traccc/fitting/kalman_filter/kalman_fitter.hpp"
+#include "traccc/geometry/detector.hpp"
 
 // detray include(s).
-#include "detray/core/detector.hpp"
-#include "detray/core/detector_metadata.hpp"
-#include "detray/definitions/pdg_particle.hpp"
-#include "detray/detectors/bfield.hpp"
-#include "detray/navigation/navigator.hpp"
-#include "detray/propagator/propagator.hpp"
-#include "detray/propagator/rk_stepper.hpp"
-#include "detray/test/utils/simulation/event_generator/track_generators.hpp"
+#include <detray/definitions/pdg_particle.hpp>
+#include <detray/detectors/bfield.hpp>
+#include <detray/navigation/navigator.hpp>
+#include <detray/propagator/propagator.hpp>
+#include <detray/propagator/rk_stepper.hpp>
+#include <detray/test/utils/simulation/event_generator/track_generators.hpp>
 
 // GTest include(s).
 #include <gtest/gtest.h>
@@ -34,16 +33,14 @@ namespace traccc {
 class KalmanFittingTests : public testing::Test {
     public:
     /// Type declarations
-    using host_detector_type = detray::detector<detray::default_metadata,
-                                                detray::host_container_types>;
-    using device_detector_type =
-        detray::detector<detray::default_metadata,
-                         detray::device_container_types>;
+    using host_detector_type = traccc::default_detector::host;
+    using device_detector_type = traccc::default_detector::device;
 
-    using b_field_t = covfie::field<detray::bfield::const_bknd_t>;
+    using scalar_type = device_detector_type::scalar_type;
+    using b_field_t = covfie::field<detray::bfield::const_bknd_t<scalar_type>>;
     using rk_stepper_type =
         detray::rk_stepper<b_field_t::view_t, traccc::default_algebra,
-                           detray::constrained_step<>>;
+                           detray::constrained_step<scalar_type>>;
     using host_navigator_type = detray::navigator<const host_detector_type>;
     using host_fitter_type =
         kalman_fitter<rk_stepper_type, host_navigator_type>;
@@ -64,11 +61,24 @@ class KalmanFittingTests : public testing::Test {
     void pull_value_tests(std::string_view file_name,
                           const std::vector<std::string>& hist_names) const;
 
-    /// Validadte the NDF
+    /// Verify that P value distribtions follow the uniform
     ///
-    /// @param host_det Detector object
-    /// @param fit_res Fitting statistics result of a track
+    /// @param file_name The name of the file holding the distributions
+    ///
+    void p_value_tests(std::string_view file_name) const;
+
+    /// Validadte the NDF for track finding output
+    ///
+    /// @param find_res Finding result of a track
     /// @param track_candidates_per_track Track candidates of a track
+    ///
+    void ndf_tests(const finding_result& find_res,
+                   const track_candidate_collection_types::host&
+                       track_candidates_per_track);
+
+    /// Validadte the NDF for track fitting output
+    ///
+    /// @param fit_res Fitting statistics result of a track
     /// @param track_states_per_track Track states of a track
     ///
     void ndf_tests(

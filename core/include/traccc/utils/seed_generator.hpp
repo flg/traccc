@@ -11,15 +11,10 @@
 #include "traccc/edm/track_parameters.hpp"
 
 // detray include(s).
-#include "detray/geometry/barcode.hpp"
-#include "detray/geometry/tracking_surface.hpp"
-#include "detray/propagator/actor_chain.hpp"
-#include "detray/propagator/actors/aborters.hpp"
-#include "detray/propagator/actors/parameter_resetter.hpp"
-#include "detray/propagator/actors/parameter_transporter.hpp"
-#include "detray/propagator/actors/pointwise_material_interactor.hpp"
-#include "detray/propagator/base_actor.hpp"
-#include "detray/propagator/propagator.hpp"
+#include <detray/geometry/barcode.hpp>
+#include <detray/geometry/tracking_surface.hpp>
+#include <detray/propagator/actors.hpp>
+#include <detray/propagator/propagator.hpp>
 
 // System include(s).
 #include <random>
@@ -30,7 +25,6 @@ namespace traccc {
 template <typename detector_t>
 struct seed_generator {
     using algebra_type = typename detector_t::algebra_type;
-    using matrix_operator = detray::dmatrix_operator<algebra_type>;
     using cxt_t = typename detector_t::geometry_context;
 
     /// Constructor with detector
@@ -48,9 +42,9 @@ struct seed_generator {
     ///
     /// @param vertex vertex of particle
     /// @param stddevs standard deviations for track parameter smearing
-    bound_track_parameters operator()(
+    bound_track_parameters<algebra_type> operator()(
         const detray::geometry::barcode surface_link,
-        const free_track_parameters& free_param,
+        const free_track_parameters<algebra_type>& free_param,
         const detray::pdg_particle<scalar>& ptc_type) {
 
         // Get bound parameter
@@ -58,11 +52,10 @@ struct seed_generator {
 
         const cxt_t ctx{};
         auto bound_vec = sf.free_to_bound_vector(ctx, free_param);
+        auto bound_cov = matrix::zero<traccc::bound_matrix<algebra_type>>();
 
-        auto bound_cov =
-            matrix_operator().template zero<e_bound_size, e_bound_size>();
-
-        bound_track_parameters bound_param{surface_link, bound_vec, bound_cov};
+        bound_track_parameters<algebra_type> bound_param{surface_link,
+                                                         bound_vec, bound_cov};
 
         // Type definitions
         using interactor_type =
@@ -79,10 +72,12 @@ struct seed_generator {
 
         for (std::size_t i = 0; i < e_bound_size; i++) {
 
-            bound_param[i] = std::normal_distribution<scalar>(
-                bound_param[i], m_stddevs[i])(m_generator);
+            if (m_stddevs[i] != scalar{0}) {
+                bound_param[i] = std::normal_distribution<scalar>(
+                    bound_param[i], m_stddevs[i])(m_generator);
+            }
 
-            matrix_operator().element(bound_param.covariance(), i, i) =
+            getter::element(bound_param.covariance(), i, i) =
                 m_stddevs[i] * m_stddevs[i];
         }
 

@@ -1,37 +1,29 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023 CERN for the benefit of the ACTS project
+ * (c) 2023-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
 
 #pragma once
 
-// Project include(s).
-#include "traccc/definitions/qualifiers.hpp"
-#include "traccc/edm/measurement.hpp"
-#include "traccc/edm/track_candidate.hpp"
-#include "traccc/edm/track_parameters.hpp"
-#include "traccc/finding/candidate_link.hpp"
-
 namespace traccc::device {
 
-template <typename config_t>
-TRACCC_DEVICE inline void build_tracks(std::size_t globalIndex,
-                                       const config_t cfg,
+TRACCC_DEVICE inline void build_tracks(const global_index_t globalIndex,
+                                       const finding_config& cfg,
                                        const build_tracks_payload& payload) {
 
-    measurement_collection_types::const_device measurements(
+    const measurement_collection_types::const_device measurements(
         payload.measurements_view);
 
-    bound_track_parameters_collection_types::const_device seeds(
+    const bound_track_parameters_collection_types::const_device seeds(
         payload.seeds_view);
 
-    vecmem::jagged_device_vector<const candidate_link> links(
+    const vecmem::jagged_device_vector<const candidate_link> links(
         payload.links_view);
 
-    vecmem::device_vector<const typename candidate_link::link_index_type> tips(
-        payload.tips_view);
+    const vecmem::device_vector<const typename candidate_link::link_index_type>
+        tips(payload.tips_view);
 
     track_candidate_container_types::device track_candidates(
         payload.track_candidates_view);
@@ -44,7 +36,8 @@ TRACCC_DEVICE inline void build_tracks(std::size_t globalIndex,
     }
 
     const auto tip = tips.at(globalIndex);
-    auto& seed = track_candidates[globalIndex].header;
+    auto& seed = track_candidates[globalIndex].header.seed_params;
+    auto& trk_quality = track_candidates[globalIndex].header.trk_quality;
     auto cands_per_track = track_candidates[globalIndex].items;
 
     // Get the link corresponding to tip
@@ -73,14 +66,19 @@ TRACCC_DEVICE inline void build_tracks(std::size_t globalIndex,
     // Resize the candidates with the exact size
     cands_per_track.resize(n_cands);
 
-    unsigned int i = 0;
+    bool success = true;
+
+    // Track summary variables
+    scalar ndf_sum = 0.f;
+    scalar chi2_sum = 0.f;
+
+    [[maybe_unused]] std::size_t num_inserted = 0;
 
     // Reversely iterate to fill the track candidates
     for (auto it = cands_per_track.rbegin(); it != cands_per_track.rend();
          it++) {
-        i++;
 
-        while (L.meas_idx > n_meas &&
+        while (L.meas_idx >= n_meas &&
                L.previous.first !=
                    std::numeric_limits<
                        candidate_link::link_index_type::first_type>::max()) {
@@ -89,26 +87,56 @@ TRACCC_DEVICE inline void build_tracks(std::size_t globalIndex,
         }
 
         // Break if the measurement is still invalid
-        if (L.meas_idx > measurements.size()) {
+        if (L.meas_idx >= measurements.size()) {
+            success = false;
             break;
         }
 
-        auto& cand = *it;
-        cand = {measurements.at(L.meas_idx)};
+        *it = {measurements.at(L.meas_idx)};
+        num_inserted++;
+
+        // Sanity check on chi2
+        assert(L.chi2 < std::numeric_limits<traccc::scalar>::max());
+        assert(L.chi2 >= 0.f);
+
+        ndf_sum += static_cast<scalar>(it->meas_dim);
+        chi2_sum += L.chi2;
 
         // Break the loop if the iterator is at the first candidate and fill the
-        // seed
+        // seed and track quality
         if (it == cands_per_track.rend() - 1) {
             seed = seeds.at(L.previous.second);
-            break;
+            trk_quality.ndf = ndf_sum - 5.f;
+            trk_quality.chi2 = chi2_sum;
+            trk_quality.n_holes = L.n_skipped;
+        } else {
+            L = links[L.previous.first][L.previous.second];
         }
-
-        L = links[L.previous.first][L.previous.second];
     }
+
+#ifndef NDEBUG
+    if (success) {
+        // Assert that we inserted exactly as many elements as we reserved
+        // space for.
+        assert(num_inserted == cands_per_track.size());
+
+        // Assert that we did not make any duplicate track states.
+        for (unsigned int i = 0; i < cands_per_track.size(); ++i) {
+            for (unsigned int j = 0; j < cands_per_track.size(); ++j) {
+                if (i != j) {
+                    assert(cands_per_track.at(i).measurement_id !=
+                           cands_per_track.at(j).measurement_id);
+                }
+            }
+        }
+    }
+#endif
+
+    // NOTE: We may at some point want to assert that `success` is true
 
     // Criteria for valid tracks
     if (n_cands >= cfg.min_track_candidates_per_track &&
-        n_cands <= cfg.max_track_candidates_per_track) {
+        n_cands <= cfg.max_track_candidates_per_track && success) {
 
         vecmem::device_atomic_ref<unsigned int> num_valid_tracks(
             *payload.n_valid_tracks);

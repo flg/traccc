@@ -7,26 +7,26 @@
 
 #pragma once
 
-#include "detray/detectors/bfield.hpp"
-#include "detray/propagator/actor_chain.hpp"
-#include "detray/propagator/actors/aborters.hpp"
-#include "detray/propagator/actors/parameter_resetter.hpp"
-#include "detray/propagator/actors/parameter_transporter.hpp"
-#include "detray/propagator/actors/pointwise_material_interactor.hpp"
-#include "detray/propagator/propagator.hpp"
-#include "detray/propagator/rk_stepper.hpp"
+// Project include(s)
 #include "traccc/cuda/finding/finding_algorithm.hpp"
 #include "traccc/finding/actors/ckf_aborter.hpp"
 #include "traccc/finding/actors/interaction_register.hpp"
 #include "traccc/geometry/detector.hpp"
 
+// Detray include(s)
+#include <detray/detectors/bfield.hpp>
+#include <detray/propagator/actors.hpp>
+#include <detray/propagator/propagator.hpp>
+#include <detray/propagator/rk_stepper.hpp>
+
 namespace traccc::cuda::kernels {
 
-using default_detector_type =
-    detray::detector<detray::default_metadata, detray::device_container_types>;
-using default_stepper_type =
-    detray::rk_stepper<covfie::field<detray::bfield::const_bknd_t>::view_t,
-                       traccc::default_algebra, detray::constrained_step<>>;
+using default_detector_type = traccc::default_detector::device;
+using default_stepper_type = detray::rk_stepper<
+    covfie::field<detray::bfield::const_bknd_t<
+        default_detector_type::scalar_type>>::view_t,
+    default_detector_type::algebra_type,
+    detray::constrained_step<default_detector_type::scalar_type>>;
 using default_navigator_type = detray::navigator<const default_detector_type>;
 
 using default_finding_algorithm =

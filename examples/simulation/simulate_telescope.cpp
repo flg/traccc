@@ -19,14 +19,14 @@
 #include "traccc/simulation/smearing_writer.hpp"
 
 // detray include(s).
-#include "detray/detectors/bfield.hpp"
-#include "detray/geometry/mask.hpp"
-#include "detray/geometry/shapes/rectangle2D.hpp"
-#include "detray/io/frontend/detector_writer.hpp"
-#include "detray/materials/material.hpp"
-#include "detray/navigation/detail/ray.hpp"
-#include "detray/test/utils/detectors/build_telescope_detector.hpp"
-#include "detray/test/utils/simulation/event_generator/track_generators.hpp"
+#include <detray/detectors/bfield.hpp>
+#include <detray/geometry/mask.hpp>
+#include <detray/geometry/shapes/rectangle2D.hpp>
+#include <detray/io/frontend/detector_writer.hpp>
+#include <detray/materials/material.hpp>
+#include <detray/test/utils/detectors/build_telescope_detector.hpp>
+#include <detray/test/utils/simulation/event_generator/track_generators.hpp>
+#include <detray/tracks/ray.hpp>
 
 // VecMem include(s).
 #include <vecmem/memory/host_memory_resource.hpp>
@@ -69,9 +69,9 @@ int simulate(const traccc::opts::generation& generation_opts,
     }
 
     // B field value and its type
-    using b_field_t = covfie::field<detray::bfield::const_bknd_t>;
-    const vector3 B{0, 0, 2 * detray::unit<scalar>::T};
-    auto field = detray::bfield::create_const_field(B);
+    using b_field_t = covfie::field<detray::bfield::const_bknd_t<scalar>>;
+    const vector3 B{0, 0, 2 * traccc::unit<scalar>::T};
+    auto field = detray::bfield::create_const_field<scalar>(B);
 
     // Set material and thickness
     detray::material<scalar> mat;
@@ -84,10 +84,10 @@ int simulate(const traccc::opts::generation& generation_opts,
     const scalar thickness = telescope_opts.thickness;
 
     // Use rectangle surfaces
-    detray::mask<detray::rectangle2D> rectangle{0u, telescope_opts.half_length,
-                                                telescope_opts.half_length};
+    detray::mask<detray::rectangle2D, traccc::default_algebra> rectangle{
+        0u, telescope_opts.half_length, telescope_opts.half_length};
 
-    detray::tel_det_config<> tel_cfg{rectangle};
+    detray::tel_det_config tel_cfg{rectangle};
     tel_cfg.positions(plane_positions);
     tel_cfg.module_material(mat);
     tel_cfg.mat_thickness(thickness);
@@ -101,7 +101,7 @@ int simulate(const traccc::opts::generation& generation_opts,
 
     // Origin of particles
     using generator_type =
-        detray::random_track_generator<traccc::free_track_parameters,
+        detray::random_track_generator<traccc::free_track_parameters<>,
                                        uniform_gen_t>;
     generator_type::configuration gen_cfg{};
     gen_cfg.n_tracks(generation_opts.gen_nparticles);
@@ -154,6 +154,8 @@ int simulate(const traccc::opts::generation& generation_opts,
 // The main routine
 //
 int main(int argc, char* argv[]) {
+    std::unique_ptr<const traccc::Logger> logger = traccc::getDefaultLogger(
+        "TracccExampleSimulateTelescope", traccc::Logging::Level::INFO);
 
     // Program options.
     traccc::opts::generation generation_opts;
@@ -164,7 +166,8 @@ int main(int argc, char* argv[]) {
         "Telescope-Detector Simulation",
         {generation_opts, output_opts, propagation_opts, telescope_opts},
         argc,
-        argv};
+        argv,
+        logger->cloneWithSuffix("Options")};
 
     // Run the application.
     return simulate(generation_opts, output_opts, propagation_opts,

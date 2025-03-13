@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2024 CERN for the benefit of the ACTS project
+ * (c) 2024-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -22,17 +22,14 @@
 #include "benchmarks/toy_detector_benchmark.hpp"
 
 // Detray include(s).
-#include "detray/core/detector.hpp"
-#include "detray/detectors/bfield.hpp"
-#include "detray/io/frontend/detector_reader.hpp"
-#include "detray/navigation/navigator.hpp"
-#include "detray/propagator/propagator.hpp"
-#include "detray/propagator/rk_stepper.hpp"
+#include <detray/detectors/bfield.hpp>
+#include <detray/io/frontend/detector_reader.hpp>
+#include <detray/navigation/navigator.hpp>
+#include <detray/propagator/rk_stepper.hpp>
 
 // VecMem include(s).
 #include <vecmem/memory/cuda/device_memory_resource.hpp>
 #include <vecmem/memory/cuda/host_memory_resource.hpp>
-#include <vecmem/memory/cuda/managed_memory_resource.hpp>
 #include <vecmem/memory/host_memory_resource.hpp>
 #include <vecmem/utils/cuda/async_copy.hpp>
 #include <vecmem/utils/cuda/copy.hpp>
@@ -40,13 +37,12 @@
 // Google benchmark include(s).
 #include <benchmark/benchmark.h>
 
-BENCHMARK_F(ToyDetectorBenchmark, CUDA)(benchmark::State& state) {
+BENCHMARK_DEFINE_F(ToyDetectorBenchmark, CUDA)(benchmark::State& state) {
 
     // Type declarations
-    using rk_stepper_type =
-        detray::rk_stepper<b_field_t::view_t,
-                           typename detector_type::algebra_type,
-                           detray::constrained_step<>>;
+    using rk_stepper_type = detray::rk_stepper<
+        b_field_t::view_t, typename detector_type::algebra_type,
+        detray::constrained_step<typename detector_type::scalar_type>>;
     using host_detector_type = traccc::default_detector::host;
     using device_detector_type = traccc::default_detector::device;
     using device_navigator_type = detray::navigator<const device_detector_type>;
@@ -57,7 +53,6 @@ BENCHMARK_F(ToyDetectorBenchmark, CUDA)(benchmark::State& state) {
     vecmem::cuda::host_memory_resource cuda_host_mr;
     vecmem::cuda::device_memory_resource device_mr;
     traccc::memory_resource mr{device_mr, &cuda_host_mr};
-    vecmem::cuda::managed_memory_resource mng_mr;
 
     // Copy and stream
     vecmem::copy host_copy;
@@ -66,14 +61,15 @@ BENCHMARK_F(ToyDetectorBenchmark, CUDA)(benchmark::State& state) {
     vecmem::cuda::async_copy async_copy{stream.cudaStream()};
 
     // Read back detector file
-    host_detector_type det{mng_mr};
+    host_detector_type det{cuda_host_mr};
     traccc::io::read_detector(
-        det, mng_mr, sim_dir + "toy_detector_geometry.json",
+        det, cuda_host_mr, sim_dir + "toy_detector_geometry.json",
         sim_dir + "toy_detector_homogeneous_material.json",
         sim_dir + "toy_detector_surface_grids.json");
 
     // B field
-    auto field = detray::bfield::create_const_field(B);
+    auto field =
+        detray::bfield::create_const_field<host_detector_type::scalar_type>(B);
 
     // Algorithms
     traccc::cuda::seeding_algorithm sa_cuda(seeding_cfg, grid_cfg, filter_cfg,
@@ -84,8 +80,10 @@ BENCHMARK_F(ToyDetectorBenchmark, CUDA)(benchmark::State& state) {
     traccc::cuda::fitting_algorithm<device_fitter_type> device_fitting(
         fitting_cfg, mr, async_copy, stream);
 
+    // Copy detector to device
+    auto det_buffer = detray::get_buffer(det, device_mr, copy);
     // Detector view object
-    auto det_view = detray::get_data(det);
+    auto det_view = detray::get_data(det_buffer);
 
     // D2H copy object
     traccc::device::container_d2h_copy_alg<traccc::track_state_container_types>
@@ -109,7 +107,7 @@ BENCHMARK_F(ToyDetectorBenchmark, CUDA)(benchmark::State& state) {
             auto& measurements_per_event = measurements[i_evt];
 
             // Copy the spacepoint and module data to the device.
-            traccc::spacepoint_collection_types::buffer spacepoints_cuda_buffer(
+            traccc::edm::spacepoint_collection::buffer spacepoints_cuda_buffer(
                 static_cast<unsigned int>(spacepoints_per_event.size()),
                 mr.main);
             async_copy.setup(spacepoints_cuda_buffer)->ignore();
@@ -127,13 +125,14 @@ BENCHMARK_F(ToyDetectorBenchmark, CUDA)(benchmark::State& state) {
                 ->ignore();
 
             // Run seeding
-            traccc::seed_collection_types::buffer seeds_cuda_buffer =
+            traccc::edm::seed_collection::buffer seeds_cuda_buffer =
                 sa_cuda(spacepoints_cuda_buffer);
 
             // Run track parameter estimation
             traccc::bound_track_parameters_collection_types::buffer
                 params_cuda_buffer =
-                    tp_cuda(spacepoints_cuda_buffer, seeds_cuda_buffer, B);
+                    tp_cuda(measurements_cuda_buffer, spacepoints_cuda_buffer,
+                            seeds_cuda_buffer, B);
 
             // Run CKF track finding
             traccc::track_candidate_container_types::buffer
@@ -147,7 +146,7 @@ BENCHMARK_F(ToyDetectorBenchmark, CUDA)(benchmark::State& state) {
                     det_view, field, track_candidates_cuda_buffer);
 
             // Create a temporary buffer that will receive the device memory.
-            auto size = track_states_cuda_buffer.headers.size();
+            /*auto size = track_states_cuda_buffer.headers.size();
             std::vector<std::size_t> capacities(size, 0);
             std::transform(track_states_cuda_buffer.items.host_ptr(),
                            track_states_cuda_buffer.items.host_ptr() + size,
@@ -156,10 +155,12 @@ BENCHMARK_F(ToyDetectorBenchmark, CUDA)(benchmark::State& state) {
 
             // Copy the track states back to the host.
             traccc::track_state_container_types::host track_states_host =
-                track_state_d2h(track_states_cuda_buffer);
+                track_state_d2h(track_states_cuda_buffer);*/
         }
     }
 
     state.counters["event_throughput_Hz"] = benchmark::Counter(
         static_cast<double>(n_events), benchmark::Counter::kIsRate);
 }
+
+BENCHMARK_REGISTER_F(ToyDetectorBenchmark, CUDA)->UseRealTime();

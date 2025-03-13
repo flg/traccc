@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2021-2022 CERN for the benefit of the ACTS project
+ * (c) 2021-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -15,30 +15,33 @@ namespace traccc::device {
 
 TRACCC_HOST_DEVICE
 inline void estimate_track_params(
-    const std::size_t globalIndex,
-    const spacepoint_collection_types::const_view& spacepoints_view,
-    const seed_collection_types::const_view& seeds_view, const vector3& bfield,
+    const global_index_t globalIndex,
+    const measurement_collection_types::const_view& measurements_view,
+    const edm::spacepoint_collection::const_view& spacepoints_view,
+    const edm::seed_collection::const_view& seeds_view, const vector3& bfield,
     const std::array<traccc::scalar, traccc::e_bound_size>& stddev,
     bound_track_parameters_collection_types::view params_view) {
 
     // Check if anything needs to be done.
-    const seed_collection_types::const_device seeds_device(seeds_view);
+    const edm::seed_collection::const_device seeds_device(seeds_view);
     if (globalIndex >= seeds_device.size()) {
         return;
     }
 
-    const spacepoint_collection_types::const_device spacepoints_device(
+    const measurement_collection_types::const_device measurements_device(
+        measurements_view);
+    const edm::spacepoint_collection::const_device spacepoints_device(
         spacepoints_view);
 
     bound_track_parameters_collection_types::device params_device(params_view);
 
-    const seed& this_seed =
-        seeds_device.at(static_cast<unsigned int>(globalIndex));
+    const edm::seed_collection::const_device::const_proxy_type this_seed =
+        seeds_device.at(globalIndex);
 
     // Get bound track parameter
-    bound_track_parameters track_params;
-    track_params.set_vector(
-        seed_to_bound_vector(spacepoints_device, this_seed, bfield));
+    bound_track_parameters<> track_params;
+    track_params.set_vector(seed_to_bound_vector(
+        measurements_device, spacepoints_device, this_seed, bfield));
 
     // Set Covariance
     for (std::size_t i = 0; i < e_bound_size; i++) {
@@ -47,12 +50,13 @@ inline void estimate_track_params(
     }
 
     // Get geometry ID for bottom spacepoint
-    const auto& spB =
-        spacepoints_device.at(static_cast<unsigned int>(this_seed.spB_link));
-    track_params.set_surface_link(spB.meas.surface_link);
+    const edm::spacepoint_collection::const_device::const_proxy_type spB =
+        spacepoints_device.at(this_seed.bottom_index());
+    track_params.set_surface_link(
+        measurements_device.at(spB.measurement_index()).surface_link);
 
     // Save the object into global memory.
-    params_device[static_cast<unsigned int>(globalIndex)] = track_params;
+    params_device.at(globalIndex) = track_params;
 }
 
 }  // namespace traccc::device

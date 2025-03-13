@@ -1,12 +1,12 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2021-2022 CERN for the benefit of the ACTS project
+ * (c) 2021-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
 
 // Local include(s).
-#include "traccc/kokkos/seeding/spacepoint_binning.hpp"
+#include "traccc/kokkos/seeding/details/spacepoint_binning.hpp"
 
 #include "traccc/kokkos/utils/definitions.hpp"
 
@@ -17,17 +17,20 @@
 // VecMem include(s).
 #include <vecmem/utils/copy.hpp>
 
-namespace traccc::kokkos {
+namespace traccc::kokkos::details {
 
 spacepoint_binning::spacepoint_binning(
     const seedfinder_config& config, const spacepoint_grid_config& grid_config,
-    const traccc::memory_resource& mr)
-    : m_config(config), m_axes(get_axes(grid_config, *(mr.host))), m_mr(mr) {
+    const traccc::memory_resource& mr, std::unique_ptr<const Logger> logger)
+    : messaging(std::move(logger)),
+      m_config(config),
+      m_axes(get_axes(grid_config, *(mr.host))),
+      m_mr(mr) {
     m_copy = std::make_unique<vecmem::copy>();
 }
 
-spacepoint_binning::output_type spacepoint_binning::operator()(
-    const spacepoint_collection_types::const_view& spacepoints_view) const {
+traccc::details::spacepoint_grid_types::buffer spacepoint_binning::operator()(
+    const edm::spacepoint_collection::const_view& spacepoints_view) const {
 
     // Get the spacepoint sizes from the view
     auto sp_size = m_copy->get_size(spacepoints_view);
@@ -57,9 +60,10 @@ spacepoint_binning::output_type spacepoint_binning::operator()(
                 Kokkos::TeamThreadRange(team_member, num_threads),
                 [&](const int& thr) {
                     device::count_grid_capacities(
-                        static_cast<std::size_t>(team_member.league_rank() *
-                                                     team_member.team_size() +
-                                                 thr),
+                        static_cast<device::global_index_t>(
+                            team_member.league_rank() *
+                                team_member.team_size() +
+                            thr),
                         config, axes.first, axes.second, spacepoints_view,
                         grid_capacities_view);
                 });
@@ -71,13 +75,13 @@ spacepoint_binning::output_type spacepoint_binning::operator()(
     (*m_copy)(grid_capacities_buff, grid_capacities_host)->wait();
 
     // Create the grid buffer.
-    sp_grid_buffer grid_buffer(
+    traccc::details::spacepoint_grid_types::buffer grid_buffer(
         m_axes.first, m_axes.second,
         std::vector<std::size_t>(grid_capacities_host.begin(),
                                  grid_capacities_host.end()),
         m_mr.main, m_mr.host, vecmem::data::buffer_type::resizable);
     m_copy->setup(grid_buffer._buffer)->wait();
-    sp_grid_view grid_view = grid_buffer;
+    traccc::details::spacepoint_grid_types::view grid_view = grid_buffer;
 
     // Populate the grid.
     Kokkos::parallel_for(
@@ -98,4 +102,4 @@ spacepoint_binning::output_type spacepoint_binning::operator()(
     return grid_buffer;
 }
 
-}  // namespace traccc::kokkos
+}  // namespace traccc::kokkos::details

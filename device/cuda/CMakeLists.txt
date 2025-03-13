@@ -1,6 +1,6 @@
 # TRACCC library, part of the ACTS project (R&D line)
 #
-# (c) 2021-2024 CERN for the benefit of the ACTS project
+# (c) 2021-2025 CERN for the benefit of the ACTS project
 #
 # Mozilla Public License Version 2.0
 
@@ -36,12 +36,12 @@ traccc_add_library( traccc_cuda cuda TYPE SHARED
   # Seed finding code.
   "include/traccc/cuda/seeding/track_params_estimation.hpp"
   "src/seeding/track_params_estimation.cu"
-  "include/traccc/cuda/seeding/seed_finding.hpp"
+  "include/traccc/cuda/seeding/details/spacepoint_binning.hpp"
+  "src/seeding/spacepoint_binning.cu"
+  "include/traccc/cuda/seeding/details/seed_finding.hpp"
   "src/seeding/seed_finding.cu"
   "include/traccc/cuda/seeding/seeding_algorithm.hpp"
   "src/seeding/seeding_algorithm.cpp"
-  "include/traccc/cuda/seeding/spacepoint_binning.hpp"
-  "src/seeding/spacepoint_binning.cu"
   "include/traccc/cuda/seeding/spacepoint_formation_algorithm.hpp"
   "src/seeding/spacepoint_formation_algorithm.cu"
   # Clusterization
@@ -106,7 +106,14 @@ target_compile_options( traccc_cuda
   PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr> )
 target_link_libraries( traccc_cuda
   PUBLIC traccc::core detray::core vecmem::core covfie::core
-  PRIVATE CUDA::cudart traccc::Thrust traccc::device_common vecmem::cuda )
+  PRIVATE CUDA::cudart traccc::device_common vecmem::cuda )
+
+# Set up Thrust specifically for the traccc::cuda library.
+thrust_create_target( traccc::cuda_thrust
+  HOST CPP
+  DEVICE CUDA )
+target_link_libraries( traccc::cuda_thrust INTERFACE CUDA::cudart )
+target_link_libraries( traccc_cuda PRIVATE traccc::cuda_thrust )
 
 # For CUDA 11 turn on separable compilation. This is necessary for using
 # Thrust 2.1.0.

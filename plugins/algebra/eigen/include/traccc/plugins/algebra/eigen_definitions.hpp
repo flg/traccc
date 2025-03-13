@@ -9,7 +9,7 @@
 #pragma once
 
 // Detray include(s).
-#include "detray/plugins/algebra/eigen_definitions.hpp"
+#include <detray/plugins/algebra/eigen_definitions.hpp>
 
 // VecMem include(s).
 #include <vecmem/containers/jagged_vector.hpp>
@@ -19,6 +19,8 @@
 #include <array>
 #include <map>
 #include <tuple>
+
+#define ALGEBRA_PLUGIN detray::eigen
 
 namespace traccc {
 
@@ -38,8 +40,5 @@ using dmap = std::map<key_type, value_type>;
 
 template <class... types>
 using dtuple = std::tuple<types...>;
-
-namespace getter = algebra::getter;
-namespace vector = algebra::vector;
 
 }  // namespace traccc

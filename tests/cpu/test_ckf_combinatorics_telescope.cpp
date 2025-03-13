@@ -18,9 +18,9 @@
 #include "traccc/utils/seed_generator.hpp"
 
 // detray include(s).
-#include "detray/io/frontend/detector_reader.hpp"
-#include "detray/propagator/propagator.hpp"
-#include "detray/test/utils/simulation/event_generator/track_generators.hpp"
+#include <detray/io/frontend/detector_reader.hpp>
+#include <detray/propagator/propagator.hpp>
+#include <detray/test/utils/simulation/event_generator/track_generators.hpp>
 
 // VecMem include(s).
 #include <vecmem/memory/host_memory_resource.hpp>
@@ -64,7 +64,9 @@ TEST_P(CpuCkfCombinatoricsTelescopeTests, Run) {
     const auto [host_det, names] =
         detray::io::read_detector<host_detector_type>(host_mr, reader_cfg);
 
-    auto field = detray::bfield::create_const_field(B);
+    auto field =
+        detray::bfield::create_const_field<host_detector_type::scalar_type>(
+            std::get<13>(GetParam()));
 
     /***************************
      * Generate simulation data
@@ -72,7 +74,7 @@ TEST_P(CpuCkfCombinatoricsTelescopeTests, Run) {
 
     // Track generator
     using generator_type =
-        detray::random_track_generator<traccc::free_track_parameters,
+        detray::random_track_generator<traccc::free_track_parameters<>,
                                        uniform_gen_t>;
     generator_type::configuration gen_cfg{};
     gen_cfg.n_tracks(n_truth_tracks);
@@ -100,10 +102,6 @@ TEST_P(CpuCkfCombinatoricsTelescopeTests, Run) {
                                  writer_type>(
         std::get<6>(GetParam()), n_events, host_det, field,
         std::move(generator), std::move(smearer_writer_cfg), full_path);
-    sim.get_config().propagation.navigation.overstep_tolerance =
-        -100.f * unit<float>::um;
-    sim.get_config().propagation.navigation.max_mask_tolerance =
-        1.f * unit<float>::mm;
     sim.run();
 
     /*****************************
@@ -118,17 +116,10 @@ TEST_P(CpuCkfCombinatoricsTelescopeTests, Run) {
     cfg_no_limit.max_num_branches_per_seed =
         std::numeric_limits<unsigned int>::max();
     cfg_no_limit.chi2_max = 30.f;
-    cfg_no_limit.propagation.navigation.overstep_tolerance =
-        -100.f * unit<float>::um;
-    cfg_no_limit.propagation.navigation.max_mask_tolerance =
-        1.f * unit<float>::mm;
 
     traccc::finding_config cfg_limit;
     cfg_limit.max_num_branches_per_seed = 500;
     cfg_limit.chi2_max = 30.f;
-    cfg_limit.propagation.navigation.overstep_tolerance =
-        -100.f * unit<float>::um;
-    cfg_limit.propagation.navigation.max_mask_tolerance = 1.f * unit<float>::mm;
 
     // Finding algorithm object
     traccc::host::combinatorial_kalman_filter_algorithm host_finding(
@@ -149,7 +140,8 @@ TEST_P(CpuCkfCombinatoricsTelescopeTests, Run) {
         // Prepare truth seeds
         traccc::bound_track_parameters_collection_types::host seeds(&host_mr);
         for (unsigned int i_trk = 0; i_trk < n_truth_tracks; i_trk++) {
-            seeds.push_back(truth_track_candidates.at(i_trk).header);
+            seeds.push_back(
+                truth_track_candidates.at(i_trk).header.seed_params);
         }
         ASSERT_EQ(seeds.size(), n_truth_tracks);
         const traccc::bound_track_parameters_collection_types::const_view
@@ -186,7 +178,7 @@ INSTANTIATE_TEST_SUITE_P(
         std::array<scalar, 3u>{0.f, 0.f, 0.f},
         std::array<scalar, 2u>{100.f, 100.f}, std::array<scalar, 2u>{0.f, 0.f},
         std::array<scalar, 2u>{0.f, 0.f}, detray::muon<scalar>(), 2, 1, false,
-        20.f, 9u, 20.f)));
+        20.f, 9u, 20.f, vector3{2 * traccc::unit<scalar>::T, 0, 0})));
 
 // Testing three identical tracks
 INSTANTIATE_TEST_SUITE_P(
@@ -196,4 +188,4 @@ INSTANTIATE_TEST_SUITE_P(
         std::array<scalar, 3u>{0.f, 0.f, 0.f},
         std::array<scalar, 2u>{100.f, 100.f}, std::array<scalar, 2u>{0.f, 0.f},
         std::array<scalar, 2u>{0.f, 0.f}, detray::muon<scalar>(), 3, 1, false,
-        20.f, 9u, 20.f)));
+        20.f, 9u, 20.f, vector3{2 * traccc::unit<scalar>::T, 0, 0})));

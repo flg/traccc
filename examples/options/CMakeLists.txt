@@ -1,6 +1,6 @@
 # TRACCC library, part of the ACTS project (R&D line)
 #
-# (c) 2022-2024 CERN for the benefit of the ACTS project
+# (c) 2022-2025 CERN for the benefit of the ACTS project
 #
 # Mozilla Public License Version 2.0
 
@@ -14,7 +14,6 @@ traccc_add_library( traccc_options options TYPE SHARED
   "include/traccc/options/clusterization.hpp"
   "include/traccc/options/detector.hpp"
   "include/traccc/options/generation.hpp"
-  "include/traccc/options/handle_argument_errors.hpp"
   "include/traccc/options/input_data.hpp"
   "include/traccc/options/output_data.hpp"
   "include/traccc/options/performance.hpp"
@@ -23,6 +22,7 @@ traccc_add_library( traccc_options options TYPE SHARED
   "include/traccc/options/threading.hpp"
   "include/traccc/options/throughput.hpp"
   "include/traccc/options/track_finding.hpp"
+  "include/traccc/options/track_fitting.hpp"
   "include/traccc/options/track_propagation.hpp"
   "include/traccc/options/track_resolution.hpp"
   "include/traccc/options/track_seeding.hpp"
@@ -32,7 +32,6 @@ traccc_add_library( traccc_options options TYPE SHARED
   "src/clusterization.cpp"
   "src/detector.cpp"
   "src/generation.cpp"
-  "src/handle_argument_errors.cpp"
   "src/input_data.cpp"
   "src/output_data.cpp"
   "src/performance.cpp"
@@ -41,6 +40,7 @@ traccc_add_library( traccc_options options TYPE SHARED
   "src/threading.cpp"
   "src/throughput.cpp"
   "src/track_finding.cpp"
+  "src/track_fitting.cpp"
   "src/track_propagation.cpp"
   "src/track_resolution.cpp"
   "src/track_seeding.cpp"
@@ -50,4 +50,5 @@ target_link_libraries( traccc_options
       Boost::program_options
       traccc::io
       traccc::performance
+      traccc::utils
 )

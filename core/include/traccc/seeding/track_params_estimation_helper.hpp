@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2021-2024 CERN for the benefit of the ACTS project
+ * (c) 2021-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -9,8 +9,8 @@
 
 // Library include(s).
 #include "traccc/definitions/math.hpp"
-#include "traccc/edm/seed.hpp"
-#include "traccc/edm/spacepoint.hpp"
+#include "traccc/edm/seed_collection.hpp"
+#include "traccc/edm/spacepoint_collection.hpp"
 #include "traccc/edm/track_parameters.hpp"
 
 // System include(s).
@@ -35,27 +35,28 @@ inline TRACCC_HOST_DEVICE vector2 uv_transform(const scalar& x,
 /// helper functions (for both cpu and gpu) to calculate bound track parameter
 /// at the bottom spacepoint
 ///
+/// @param measurements is the measurement collection
+/// @param spacepoints is the spacepoint collection
 /// @param seed is the input seed
 /// @param bfield is the magnetic field
-/// @param mass is the mass of particle
-template <typename spacepoint_collection_t>
-inline TRACCC_HOST_DEVICE bound_vector
-seed_to_bound_vector(const spacepoint_collection_t& sp_collection,
-                     const seed& seed, const vector3& bfield) {
+///
+template <typename T>
+inline TRACCC_HOST_DEVICE bound_vector<> seed_to_bound_vector(
+    const measurement_collection_types::const_device& measurements,
+    const edm::spacepoint_collection::const_device& spacepoints,
+    const edm::seed<T>& seed, const vector3& bfield) {
 
-    bound_vector params;
+    bound_vector<> params = matrix::zero<bound_vector<>>();
 
-    const auto& spB =
-        sp_collection.at(static_cast<unsigned int>(seed.spB_link));
-    const auto& spM =
-        sp_collection.at(static_cast<unsigned int>(seed.spM_link));
-    const auto& spT =
-        sp_collection.at(static_cast<unsigned int>(seed.spT_link));
+    const edm::spacepoint_collection::const_device::const_proxy_type spB =
+        spacepoints.at(seed.bottom_index());
+    const edm::spacepoint_collection::const_device::const_proxy_type spM =
+        spacepoints.at(seed.middle_index());
+    const edm::spacepoint_collection::const_device::const_proxy_type spT =
+        spacepoints.at(seed.top_index());
 
-    darray<vector3, 3> sp_global_positions;
-    sp_global_positions[0] = spB.global;
-    sp_global_positions[1] = spM.global;
-    sp_global_positions[2] = spT.global;
+    darray<vector3, 3> sp_global_positions{spB.global(), spM.global(),
+                                           spT.global()};
 
     // Define a new coordinate frame with its origin at the bottom space
     // point, z axis long the magnetic field direction and y axis
@@ -73,8 +74,8 @@ seed_to_bound_vector(const spacepoint_collection_t& sp_collection,
     transform3 trans(translation, newZAxis, newXAxis);
 
     // The coordinate of the middle and top space point in the new frame
-    auto local1 = trans.point_to_local(sp_global_positions[1]);
-    auto local2 = trans.point_to_local(sp_global_positions[2]);
+    const point3 local1 = trans.point_to_local(sp_global_positions[1]);
+    const point3 local2 = trans.point_to_local(sp_global_positions[2]);
 
     // The uv1.y() should be zero
     vector2 uv1 = uv_transform(local1[0], local1[1]);
@@ -86,34 +87,34 @@ seed_to_bound_vector(const spacepoint_collection_t& sp_collection,
     scalar B = uv2[1] - A * uv2[0];
 
     // Radius (with a sign)
-    scalar R = -getter::perp(vector2{1.f, A}) / (2.f * B);
+    scalar R = -vector::perp(vector2{1.f, A}) / (2.f * B);
     // The (1/tanTheta) of momentum in the new frame
     scalar invTanTheta =
-        local2[2] / (2.f * R * math::asin(getter::perp(local2) / (2.f * R)));
+        local2[2] / (2.f * R * math::asin(vector::perp(local2) / (2.f * R)));
 
     // The momentum direction in the new frame (the center of the circle
     // has the coordinate (-1.*A/(2*B), 1./(2*B)))
     vector3 transDirection =
-        vector3({1.f, A, scalar(getter::perp(vector2{1.f, A})) * invTanTheta});
+        vector3({1.f, A, scalar(vector::perp(vector2{1.f, A})) * invTanTheta});
     // Transform it back to the original frame
     vector3 direction =
         transform3::rotate(trans._data, vector::normalize(transDirection));
 
     // The estimated phi and theta
-    getter::element(params, e_bound_phi, 0) = getter::phi(direction);
-    getter::element(params, e_bound_theta, 0) = getter::theta(direction);
+    getter::element(params, e_bound_phi, 0) = vector::phi(direction);
+    getter::element(params, e_bound_theta, 0) = vector::theta(direction);
 
     // The measured loc0 and loc1
-    const auto& meas_for_spB = spB.meas;
+    const measurement& meas_for_spB = measurements.at(spB.measurement_index());
     getter::element(params, e_bound_loc0, 0) = meas_for_spB.local[0];
     getter::element(params, e_bound_loc1, 0) = meas_for_spB.local[1];
 
     // The estimated q/pt in [GeV/c]^-1 (note that the pt is the
     // projection of momentum on the transverse plane of the new frame)
-    scalar qOverPt = 1.f / (R * getter::norm(bfield));
+    scalar qOverPt = 1.f / (R * vector::norm(bfield));
     // The estimated q/p in [GeV/c]^-1
     getter::element(params, e_bound_qoverp, 0) =
-        qOverPt / getter::perp(vector2{1.f, invTanTheta});
+        qOverPt / vector::perp(vector2{1.f, invTanTheta});
 
     // Make sure the time is a finite value
     assert(std::isfinite(getter::element(params, e_bound_time, 0)));

@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022-2024 CERN for the benefit of the ACTS project
+ * (c) 2022-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -8,7 +8,8 @@
 #pragma once
 
 // Local include(s).
-#include "traccc/sycl/utils/calculate1DimNdRange.hpp"
+#include "../utils/calculate1DimNdRange.hpp"
+#include "../utils/global_index.hpp"
 
 // Project include(s).
 #include "traccc/edm/device/sort_key.hpp"
@@ -23,11 +24,20 @@
 #include <vecmem/utils/copy.hpp>
 
 // oneDPL include(s).
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wshadow"
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#pragma clang diagnostic ignored "-Wshorten-64-to-32"
+#pragma clang diagnostic ignored "-Wsign-conversion"
+#pragma clang diagnostic ignored "-Wimplicit-int-conversion"
+#pragma clang diagnostic ignored "-Wimplicit-int-float-conversion"
+#pragma clang diagnostic ignored "-Wsign-compare"
 #include <oneapi/dpl/algorithm>
 #include <oneapi/dpl/execution>
+#pragma clang diagnostic pop
 
 // SYCL include(s).
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 namespace traccc::sycl {
 namespace kernels {
@@ -46,7 +56,7 @@ track_state_container_types::buffer fit_tracks(
     const typename track_candidate_container_types::const_view&
         track_candidates_view,
     const fitting_config& config, const memory_resource& mr, vecmem::copy& copy,
-    cl::sycl::queue& queue) {
+    ::sycl::queue& queue) {
 
     // Get the number of tracks.
     const track_candidate_container_types::const_device::header_vector::
@@ -87,16 +97,16 @@ track_state_container_types::buffer fit_tracks(
 
     // The execution range for the two kernels of the function.
     static constexpr unsigned int localSize = 64;
-    cl::sycl::nd_range<1> range = calculate1DimNdRange(n_tracks, localSize);
+    ::sycl::nd_range<1> range = calculate1DimNdRange(n_tracks, localSize);
 
     // Fill the keys and param_ids buffers.
-    cl::sycl::event fill_keys_event = queue.submit([&](cl::sycl::handler& h) {
+    ::sycl::event fill_keys_event = queue.submit([&](::sycl::handler& h) {
         h.parallel_for<kernels::fill_sort_keys>(
             range,
             [track_candidates_view, keys_view = vecmem::get_data(keys_buffer),
-             param_ids_view = vecmem::get_data(param_ids_buffer)](
-                cl::sycl::nd_item<1> item) {
-                device::fill_sort_keys(item.get_global_linear_id(),
+             param_ids_view =
+                 vecmem::get_data(param_ids_buffer)](::sycl::nd_item<1> item) {
+                device::fill_sort_keys(details::global_index(item),
                                        track_candidates_view, keys_view,
                                        param_ids_view);
             });
@@ -115,12 +125,12 @@ track_state_container_types::buffer fit_tracks(
     track_states_headers_setup_event->wait();
     track_states_items_setup_event->wait();
     queue
-        .submit([&](cl::sycl::handler& h) {
+        .submit([&](::sycl::handler& h) {
             h.parallel_for<fit_kernel_t>(
                 range, [det_view, field_view, config, track_candidates_view,
                         param_ids_view = vecmem::get_data(param_ids_buffer),
-                        track_states_view](cl::sycl::nd_item<1> item) {
-                    device::fit<fitter_t>(item.get_global_linear_id(), det_view,
+                        track_states_view](::sycl::nd_item<1> item) {
+                    device::fit<fitter_t>(details::global_index(item), det_view,
                                           field_view, config,
                                           track_candidates_view, param_ids_view,
                                           track_states_view);

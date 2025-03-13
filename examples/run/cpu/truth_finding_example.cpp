@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023-2024 CERN for the benefit of the ACTS project
+ * (c) 2023-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -11,6 +11,7 @@
 #include "traccc/efficiency/finding_performance_writer.hpp"
 #include "traccc/finding/combinatorial_kalman_filter_algorithm.hpp"
 #include "traccc/fitting/kalman_fitting_algorithm.hpp"
+#include "traccc/geometry/detector.hpp"
 #include "traccc/io/read_detector.hpp"
 #include "traccc/io/read_detector_description.hpp"
 #include "traccc/io/read_measurements.hpp"
@@ -20,18 +21,18 @@
 #include "traccc/options/performance.hpp"
 #include "traccc/options/program_options.hpp"
 #include "traccc/options/track_finding.hpp"
+#include "traccc/options/track_fitting.hpp"
 #include "traccc/options/track_propagation.hpp"
 #include "traccc/resolution/fitting_performance_writer.hpp"
 #include "traccc/utils/seed_generator.hpp"
 
 // Detray include(s).
-#include "detray/core/detector.hpp"
-#include "detray/core/detector_metadata.hpp"
-#include "detray/detectors/bfield.hpp"
-#include "detray/io/frontend/detector_reader.hpp"
-#include "detray/navigation/navigator.hpp"
-#include "detray/propagator/propagator.hpp"
-#include "detray/propagator/rk_stepper.hpp"
+#include <detray/core/detector.hpp>
+#include <detray/detectors/bfield.hpp>
+#include <detray/io/frontend/detector_reader.hpp>
+#include <detray/navigation/navigator.hpp>
+#include <detray/propagator/propagator.hpp>
+#include <detray/propagator/rk_stepper.hpp>
 
 // VecMem include(s).
 #include <vecmem/memory/host_memory_resource.hpp>
@@ -47,9 +48,12 @@ using namespace traccc;
 
 int seq_run(const traccc::opts::track_finding& finding_opts,
             const traccc::opts::track_propagation& propagation_opts,
+            const traccc::opts::track_fitting& fitting_opts,
             const traccc::opts::input_data& input_opts,
             const traccc::opts::detector& detector_opts,
-            const traccc::opts::performance& performance_opts) {
+            const traccc::opts::performance& performance_opts,
+            std::unique_ptr<const traccc::Logger> ilogger) {
+    TRACCC_LOCAL_LOGGER(std::move(ilogger));
 
     // Memory resources used by the application.
     vecmem::host_memory_resource host_mr;
@@ -66,8 +70,8 @@ int seq_run(const traccc::opts::track_finding& finding_opts,
 
     // B field value and its type
     // @TODO: Set B field as argument
-    const traccc::vector3 B{0, 0, 2 * detray::unit<traccc::scalar>::T};
-    auto field = detray::bfield::create_const_field(B);
+    const traccc::vector3 B{0, 0, 2 * traccc::unit<traccc::scalar>::T};
+    auto field = detray::bfield::create_const_field<traccc::scalar>(B);
 
     // Construct a Detray detector object, if supported by the configuration.
     traccc::default_detector::host detector{host_mr};
@@ -82,12 +86,12 @@ int seq_run(const traccc::opts::track_finding& finding_opts,
 
     // Standard deviations for seed track parameters
     static constexpr std::array<traccc::scalar, traccc::e_bound_size> stddevs =
-        {1e-4f * detray::unit<traccc::scalar>::mm,
-         1e-4f * detray::unit<traccc::scalar>::mm,
+        {1e-4f * traccc::unit<traccc::scalar>::mm,
+         1e-4f * traccc::unit<traccc::scalar>::mm,
          1e-3f,
          1e-3f,
-         1e-4f / detray::unit<traccc::scalar>::GeV,
-         1e-4f * detray::unit<traccc::scalar>::ns};
+         1e-4f / traccc::unit<traccc::scalar>::GeV,
+         1e-4f * traccc::unit<traccc::scalar>::ns};
 
     // Propagation configuration
     detray::propagation::config propagation_config(propagation_opts);
@@ -97,13 +101,15 @@ int seq_run(const traccc::opts::track_finding& finding_opts,
     cfg.propagation = propagation_config;
 
     // Finding algorithm object
-    traccc::host::combinatorial_kalman_filter_algorithm host_finding(cfg);
+    traccc::host::combinatorial_kalman_filter_algorithm host_finding(
+        cfg, logger().clone("FindingAlg"));
 
     // Fitting algorithm object
-    traccc::fitting_config fit_cfg;
+    traccc::fitting_config fit_cfg(fitting_opts);
     fit_cfg.propagation = propagation_config;
 
-    traccc::host::kalman_fitting_algorithm host_fitting(fit_cfg, host_mr);
+    traccc::host::kalman_fitting_algorithm host_fitting(
+        fit_cfg, host_mr, logger().clone("FittingAlg"));
 
     // Seed generator
     traccc::seed_generator<traccc::default_detector::host> sg(detector,
@@ -125,7 +131,8 @@ int seq_run(const traccc::opts::track_finding& finding_opts,
         traccc::bound_track_parameters_collection_types::host seeds(&host_mr);
         const std::size_t n_tracks = truth_track_candidates.size();
         for (std::size_t i_trk = 0; i_trk < n_tracks; i_trk++) {
-            seeds.push_back(truth_track_candidates.at(i_trk).header);
+            seeds.push_back(
+                truth_track_candidates.at(i_trk).header.seed_params);
         }
 
         // Read measurements
@@ -148,8 +155,9 @@ int seq_run(const traccc::opts::track_finding& finding_opts,
         auto track_states =
             host_fitting(detector, field, traccc::get_data(track_candidates));
 
-        std::cout << "Number of fitted tracks: " << track_states.size()
-                  << std::endl;
+        std::cout << "Number of fitted tracks: ( "
+                  << count_fitted_tracks(track_states) << " / "
+                  << track_states.size() << " ) " << std::endl;
 
         const std::size_t n_fitted_tracks = track_states.size();
 
@@ -179,21 +187,25 @@ int seq_run(const traccc::opts::track_finding& finding_opts,
 // The main routine
 //
 int main(int argc, char* argv[]) {
+    std::unique_ptr<const traccc::Logger> logger = traccc::getDefaultLogger(
+        "TracccExampleTruthFinding", traccc::Logging::Level::INFO);
 
     // Program options.
     traccc::opts::detector detector_opts;
     traccc::opts::input_data input_opts;
     traccc::opts::track_finding finding_opts;
     traccc::opts::track_propagation propagation_opts;
+    traccc::opts::track_fitting fitting_opts;
     traccc::opts::performance performance_opts;
     traccc::opts::program_options program_opts{
         "Truth Track Finding on the Host",
         {detector_opts, input_opts, finding_opts, propagation_opts,
-         performance_opts},
+         fitting_opts, performance_opts},
         argc,
-        argv};
+        argv,
+        logger->cloneWithSuffix("Options")};
 
     // Run the application.
-    return seq_run(finding_opts, propagation_opts, input_opts, detector_opts,
-                   performance_opts);
+    return seq_run(finding_opts, propagation_opts, fitting_opts, input_opts,
+                   detector_opts, performance_opts, logger->clone());
 }

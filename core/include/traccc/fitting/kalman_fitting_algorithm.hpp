@@ -13,6 +13,7 @@
 #include "traccc/fitting/fitting_config.hpp"
 #include "traccc/geometry/detector.hpp"
 #include "traccc/utils/algorithm.hpp"
+#include "traccc/utils/messaging.hpp"
 
 // Detray include(s).
 #include <detray/detectors/bfield.hpp>
@@ -29,12 +30,15 @@ namespace traccc::host {
 class kalman_fitting_algorithm
     : public algorithm<track_state_container_types::host(
           const default_detector::host&,
-          const detray::bfield::const_field_t::view_t&,
+          const detray::bfield::const_field_t<
+              default_detector::host::scalar_type>::view_t&,
           const track_candidate_container_types::const_view&)>,
       public algorithm<track_state_container_types::host(
           const telescope_detector::host&,
-          const detray::bfield::const_field_t::view_t&,
-          const track_candidate_container_types::const_view&)> {
+          const detray::bfield::const_field_t<
+              telescope_detector::host::scalar_type>::view_t&,
+          const track_candidate_container_types::const_view&)>,
+      public messaging {
 
     public:
     /// Configuration type
@@ -46,8 +50,9 @@ class kalman_fitting_algorithm
     ///
     /// @param config The configuration object
     ///
-    explicit kalman_fitting_algorithm(const config_type& config,
-                                      vecmem::memory_resource& mr);
+    explicit kalman_fitting_algorithm(
+        const config_type& config, vecmem::memory_resource& mr,
+        std::unique_ptr<const Logger> logger = getDummyLogger().clone());
 
     /// Execute the algorithm
     ///
@@ -57,10 +62,12 @@ class kalman_fitting_algorithm
     ///
     /// @return A container of the fitted track states
     ///
-    output_type operator()(const default_detector::host& det,
-                           const detray::bfield::const_field_t::view_t& field,
-                           const track_candidate_container_types::const_view&
-                               track_candidates) const override;
+    output_type operator()(
+        const default_detector::host& det,
+        const detray::bfield::const_field_t<
+            default_detector::host::scalar_type>::view_t& field,
+        const track_candidate_container_types::const_view& track_candidates)
+        const override;
 
     /// Execute the algorithm
     ///
@@ -70,17 +77,18 @@ class kalman_fitting_algorithm
     ///
     /// @return A container of the fitted track states
     ///
-    output_type operator()(const telescope_detector::host& det,
-                           const detray::bfield::const_field_t::view_t& field,
-                           const track_candidate_container_types::const_view&
-                               track_candidates) const override;
+    output_type operator()(
+        const telescope_detector::host& det,
+        const detray::bfield::const_field_t<
+            telescope_detector::host::scalar_type>::view_t& field,
+        const track_candidate_container_types::const_view& track_candidates)
+        const override;
 
     private:
     /// Algorithm configuration
     config_type m_config;
     /// Memory resource to use in the algorithm
     std::reference_wrapper<vecmem::memory_resource> m_mr;
-
 };  // class kalman_fitting_algorithm
 
 }  // namespace traccc::host

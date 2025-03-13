@@ -19,6 +19,8 @@
 #ifdef TRACCC_HAVE_ROOT
 #include <TF1.h>
 #include <TFile.h>
+#include <TFitResult.h>
+#include <TFitResultPtr.h>
 #include <TH1.h>
 #endif  // TRACCC_HAVE_ROOT
 
@@ -81,6 +83,72 @@ void KalmanFittingTests::pull_value_tests(
 #endif  // TRACCC_HAVE_ROOT
 }
 
+void KalmanFittingTests::p_value_tests([
+    [maybe_unused]] std::string_view file_name) const {
+
+#ifdef TRACCC_HAVE_ROOT
+    // Open the file with the histograms.
+    std::unique_ptr<TFile> ifile(TFile::Open(file_name.data(), "READ"));
+    if ((!ifile) || ifile->IsZombie()) {
+        throw std::runtime_error(std::string("Could not open file \"") +
+                                 file_name.data() + "\"");
+    }
+
+    // Access the pvalue histogram.
+    TH1* pval_hist = dynamic_cast<TH1*>(ifile->Get("pval"));
+    if (!pval_hist) {
+
+        throw std::runtime_error("Could not access p-value histogram in file " +
+                                 std::string(file_name.data()) + "\"");
+    }
+
+    // Contant function used for the fit.
+    TF1 constant_func{"constant", "[0]", 0.f, 1.f};
+
+    // Set the seed to the number of data points divided by the number of bins
+    double exp_par = static_cast<double>(pval_hist->GetEntries()) /
+                     static_cast<double>(pval_hist->GetNbinsX());
+
+    constant_func.SetParameters(0, exp_par);
+
+    TFitResultPtr res = pval_hist->Fit("constant", "Q0S");
+
+    auto fit_par = constant_func.GetParameters();
+
+    // Some sanity checks
+    EXPECT_TRUE(fit_par[0] >= 1.f);
+    EXPECT_TRUE(exp_par >= 1.f);
+
+    EXPECT_NEAR(pval_hist->GetMean(), 0.5f, 0.05f);
+
+    // Fitted constant check (5% errror)
+    EXPECT_NEAR(fit_par[0], exp_par, exp_par * 0.05f)
+        << " fitted constant does not make sense";
+
+    // Make sure the pvalue from constant fit is higher than 0.01
+    EXPECT_GE(res->Prob(), 0.01f) << " Poor constant fitting quality";
+
+#else
+    std::cout << "P-value tests not performed without ROOT" << std::endl;
+#endif  // TRACCC_HAVE_ROOT
+}
+
+void KalmanFittingTests::ndf_tests(
+    const finding_result& find_res,
+    const track_candidate_collection_types::host& track_candidates_per_track) {
+
+    scalar dim_sum = 0;
+
+    for (const auto& cand : track_candidates_per_track) {
+        dim_sum += static_cast<scalar>(cand.meas_dim);
+    }
+
+    // Check if the number of degree of freedoms is equal to (the sum of
+    // measurement dimensions - 5)
+    ASSERT_FLOAT_EQ(static_cast<float>(find_res.trk_quality.ndf),
+                    static_cast<float>(dim_sum) - 5.f);
+}
+
 void KalmanFittingTests::ndf_tests(
     const fitting_result<traccc::default_algebra>& fit_res,
     const track_state_collection_types::host& track_states_per_track) {
@@ -90,7 +158,7 @@ void KalmanFittingTests::ndf_tests(
 
     for (const auto& state : track_states_per_track) {
 
-        if (!state.is_hole) {
+        if (!state.is_hole && state.is_smoothed) {
 
             dim_sum += static_cast<scalar>(state.get_measurement().meas_dim);
             n_effective_states++;
@@ -99,7 +167,7 @@ void KalmanFittingTests::ndf_tests(
 
     // Check if the number of degree of freedoms is equal to (the sum of
     // measurement dimensions - 5)
-    ASSERT_FLOAT_EQ(static_cast<float>(fit_res.ndf),
+    ASSERT_FLOAT_EQ(static_cast<float>(fit_res.trk_quality.ndf),
                     static_cast<float>(dim_sum) - 5.f);
 
     // The number of track states is supposed to be eqaul to the number

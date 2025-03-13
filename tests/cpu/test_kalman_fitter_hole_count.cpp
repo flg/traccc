@@ -18,8 +18,8 @@
 #include "tests/kalman_fitting_telescope_test.hpp"
 
 // detray include(s).
-#include "detray/io/frontend/detector_reader.hpp"
-#include "detray/test/utils/simulation/event_generator/track_generators.hpp"
+#include <detray/io/frontend/detector_reader.hpp>
+#include <detray/test/utils/simulation/event_generator/track_generators.hpp>
 
 // VecMem include(s).
 #include <vecmem/memory/host_memory_resource.hpp>
@@ -69,7 +69,9 @@ TEST_P(KalmanFittingHoleCountTests, Run) {
 
     const auto [host_det, names] =
         detray::io::read_detector<host_detector_type>(host_mr, reader_cfg);
-    auto field = detray::bfield::create_const_field(B);
+    auto field =
+        detray::bfield::create_const_field<host_detector_type::scalar_type>(
+            std::get<13>(GetParam()));
 
     /***************************
      * Generate simulation data
@@ -77,7 +79,7 @@ TEST_P(KalmanFittingHoleCountTests, Run) {
 
     // Track generator
     using generator_type =
-        detray::random_track_generator<traccc::free_track_parameters,
+        detray::random_track_generator<traccc::free_track_parameters<>,
                                        uniform_gen_t>;
     generator_type::configuration gen_cfg{};
     gen_cfg.n_tracks(n_truth_tracks);
@@ -105,10 +107,6 @@ TEST_P(KalmanFittingHoleCountTests, Run) {
                                  writer_type>(
         ptc, n_events, host_det, field, std::move(generator),
         std::move(smearer_writer_cfg), full_path);
-    sim.get_config().propagation.navigation.overstep_tolerance =
-        -100.f * unit<float>::um;
-    sim.get_config().propagation.navigation.max_mask_tolerance =
-        1.f * unit<float>::mm;
     sim.run();
 
     /***************
@@ -121,9 +119,6 @@ TEST_P(KalmanFittingHoleCountTests, Run) {
     // Fitting algorithm object
     traccc::fitting_config fit_cfg;
     fit_cfg.ptc_hypothesis = ptc;
-    fit_cfg.propagation.navigation.overstep_tolerance =
-        -100.f * unit<float>::um;
-    fit_cfg.propagation.navigation.max_mask_tolerance = 1.f * unit<float>::mm;
     traccc::host::kalman_fitting_algorithm fitting(fit_cfg, host_mr);
 
     // Event map
@@ -167,11 +162,11 @@ TEST_P(KalmanFittingHoleCountTests, Run) {
     // The three holes at the end are not counted as KF aborts once it goes
     // through all track candidates
     const auto& fit_res = track_states.at(0u).header;
-    ASSERT_EQ(fit_res.n_holes, 5u);
+    ASSERT_EQ(fit_res.trk_quality.n_holes, 5u);
 
     // Some sanity checks
     ASSERT_FLOAT_EQ(
-        static_cast<float>(fit_res.ndf),
+        static_cast<float>(fit_res.trk_quality.ndf),
         static_cast<float>(track_states.at(0u).items.size()) * 2.f - 5.f);
 }
 
@@ -181,4 +176,5 @@ INSTANTIATE_TEST_SUITE_P(
         "telescope_1_GeV_0_phi_muon", std::array<scalar, 3u>{0.f, 0.f, 0.f},
         std::array<scalar, 3u>{0.f, 0.f, 0.f}, std::array<scalar, 2u>{1.f, 1.f},
         std::array<scalar, 2u>{0.f, 0.f}, std::array<scalar, 2u>{0.f, 0.f},
-        detray::muon<scalar>(), 1, 1, false, 20.f, 20u, 20.f)));
+        detray::muon<scalar>(), 1, 1, false, 20.f, 20u, 20.f,
+        vector3{2 * traccc::unit<scalar>::T, 0, 0})));

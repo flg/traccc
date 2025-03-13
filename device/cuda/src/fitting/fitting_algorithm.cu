@@ -1,27 +1,29 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022-2024 CERN for the benefit of the ACTS project
+ * (c) 2022-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
 
 // Project include(s).
 #include "../utils/cuda_error_handling.hpp"
+#include "../utils/global_index.hpp"
 #include "../utils/utils.hpp"
 #include "traccc/cuda/fitting/fitting_algorithm.hpp"
 #include "traccc/fitting/device/fill_sort_keys.hpp"
 #include "traccc/fitting/device/fit.hpp"
 #include "traccc/fitting/kalman_filter/kalman_fitter.hpp"
+#include "traccc/geometry/detector.hpp"
 
 // detray include(s).
-#include "detray/core/detector_metadata.hpp"
-#include "detray/detectors/bfield.hpp"
-#include "detray/propagator/rk_stepper.hpp"
+#include <detray/detectors/bfield.hpp>
+#include <detray/propagator/rk_stepper.hpp>
 
 // Thrust include(s).
 #include <thrust/sort.h>
 
 // System include(s).
+#include <memory_resource>
 #include <vector>
 
 namespace traccc::cuda {
@@ -33,8 +35,8 @@ __global__ void fill_sort_keys(
     vecmem::data::vector_view<device::sort_key> keys_view,
     vecmem::data::vector_view<unsigned int> ids_view) {
 
-    device::fill_sort_keys(threadIdx.x + blockIdx.x * blockDim.x,
-                           track_candidates_view, keys_view, ids_view);
+    device::fill_sort_keys(details::global_index1(), track_candidates_view,
+                           keys_view, ids_view);
 }
 
 template <typename fitter_t, typename detector_view_t>
@@ -45,10 +47,9 @@ __global__ void fit(
     vecmem::data::vector_view<const unsigned int> param_ids_view,
     track_state_container_types::view track_states_view) {
 
-    int gid = threadIdx.x + blockIdx.x * blockDim.x;
-
-    device::fit<fitter_t>(gid, det_data, field_data, cfg, track_candidates_view,
-                          param_ids_view, track_states_view);
+    device::fit<fitter_t>(details::global_index1(), det_data, field_data, cfg,
+                          track_candidates_view, param_ids_view,
+                          track_states_view);
 }
 
 }  // namespace kernels
@@ -56,8 +57,9 @@ __global__ void fit(
 template <typename fitter_t>
 fitting_algorithm<fitter_t>::fitting_algorithm(
     const config_type& cfg, const traccc::memory_resource& mr,
-    vecmem::copy& copy, stream& str)
-    : m_cfg(cfg),
+    vecmem::copy& copy, stream& str, std::unique_ptr<const Logger> logger)
+    : messaging(std::move(logger)),
+      m_cfg(cfg),
       m_mr(mr),
       m_copy(copy),
       m_stream(str),
@@ -110,8 +112,11 @@ track_state_container_types::buffer fitting_algorithm<fitter_t>::operator()(
         vecmem::device_vector<device::sort_key> keys_device(keys_buffer);
         vecmem::device_vector<unsigned int> param_ids_device(param_ids_buffer);
 
-        thrust::sort_by_key(thrust::cuda::par.on(stream), keys_device.begin(),
-                            keys_device.end(), param_ids_device.begin());
+        thrust::sort_by_key(thrust::cuda::par_nosync(
+                                std::pmr::polymorphic_allocator(&m_mr.main))
+                                .on(stream),
+                            keys_device.begin(), keys_device.end(),
+                            param_ids_device.begin());
 
         // Run the track fitting
         kernels::fit<fitter_t><<<nBlocks, nThreads, 0, stream>>>(
@@ -126,11 +131,12 @@ track_state_container_types::buffer fitting_algorithm<fitter_t>::operator()(
 }
 
 // Explicit template instantiation
-using default_detector_type =
-    detray::detector<detray::default_metadata, detray::device_container_types>;
-using default_stepper_type =
-    detray::rk_stepper<covfie::field<detray::bfield::const_bknd_t>::view_t,
-                       default_algebra, detray::constrained_step<>>;
+using default_detector_type = traccc::default_detector::device;
+using default_stepper_type = detray::rk_stepper<
+    covfie::field<detray::bfield::const_bknd_t<
+        default_detector_type::scalar_type>>::view_t,
+    default_detector_type::algebra_type,
+    detray::constrained_step<default_detector_type::scalar_type>>;
 using default_navigator_type = detray::navigator<const default_detector_type>;
 using default_fitter_type =
     kalman_fitter<default_stepper_type, default_navigator_type>;

@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022-2024 CERN for the benefit of the ACTS project
+ * (c) 2022-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -8,8 +8,10 @@
 // Library include(s).
 #include "traccc/options/throughput.hpp"
 
+#include "traccc/examples/utils/printable.hpp"
+
 // System include(s).
-#include <iostream>
+#include <format>
 
 namespace traccc::opts {
 
@@ -26,17 +28,35 @@ throughput::throughput() : interface("Throughput Measurement Options") {
         "cold-run-events",
         po::value(&cold_run_events)->default_value(cold_run_events),
         "Number of events to run 'cold'");
+    m_desc.add_options()("deterministic",
+                         po::bool_switch(&deterministic_event_order)
+                             ->default_value(deterministic_event_order),
+                         "Process events in deterministic order");
+    m_desc.add_options()("random-seed",
+                         po::value(&random_seed)->default_value(random_seed),
+                         "Seed for event randomization (0 to use time)");
     m_desc.add_options()(
         "log-file", po::value(&log_file),
         "File where result logs will be printed (in append mode).");
 }
 
-std::ostream& throughput::print_impl(std::ostream& out) const {
+std::unique_ptr<configuration_printable> throughput::as_printable() const {
+    auto cat = std::make_unique<configuration_category>(m_description);
 
-    out << "  Cold run event(s) : " << cold_run_events << "\n"
-        << "  Processed event(s): " << processed_events << "\n"
-        << "  Log file          : " << log_file;
-    return out;
+    cat->add_child(std::make_unique<configuration_kv_pair>(
+        "Cold run events", std::to_string(cold_run_events)));
+    cat->add_child(std::make_unique<configuration_kv_pair>(
+        "Processed events", std::to_string(processed_events)));
+    cat->add_child(
+        std::make_unique<configuration_kv_pair>("Log file", log_file));
+    cat->add_child(std::make_unique<configuration_kv_pair>(
+        "Deterministic ordering",
+        std::format("{}", deterministic_event_order)));
+    cat->add_child(std::make_unique<configuration_kv_pair>(
+        "Random seed",
+        random_seed == 0 ? "time-based" : std::to_string(random_seed)));
+
+    return cat;
 }
 
 }  // namespace traccc::opts

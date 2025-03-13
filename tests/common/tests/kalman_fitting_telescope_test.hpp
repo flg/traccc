@@ -11,11 +11,11 @@
 #include "kalman_fitting_test.hpp"
 
 // Detray include(s).
-#include "detray/geometry/mask.hpp"
-#include "detray/geometry/shapes/rectangle2D.hpp"
-#include "detray/io/frontend/detector_writer.hpp"
-#include "detray/navigation/detail/ray.hpp"
-#include "detray/test/utils/detectors/build_telescope_detector.hpp"
+#include <detray/geometry/mask.hpp>
+#include <detray/geometry/shapes/rectangle2D.hpp>
+#include <detray/io/frontend/detector_writer.hpp>
+#include <detray/test/utils/detectors/build_telescope_detector.hpp>
+#include <detray/tracks/ray.hpp>
 
 namespace traccc {
 
@@ -35,42 +35,48 @@ namespace traccc {
 /// (11) offset from origin of the first plane in mm
 /// (12) Number of planes
 /// (13) Spacing between planes in mm
+/// (14) Magnetic field
 class KalmanFittingTelescopeTests
     : public KalmanFittingTests,
       public testing::WithParamInterface<std::tuple<
           std::string, std::array<scalar, 3u>, std::array<scalar, 3u>,
           std::array<scalar, 2u>, std::array<scalar, 2u>,
           std::array<scalar, 2u>, detray::pdg_particle<scalar>, unsigned int,
-          unsigned int, bool, scalar, unsigned int, scalar>> {
+          unsigned int, bool, scalar, unsigned int, scalar, vector3>> {
 
     public:
     /// Plane alignment direction (aligned to x-axis)
     static const inline detray::detail::ray<traccc::default_algebra> traj{
         {0, 0, 0}, 0, {1, 0, 0}, -1};
 
-    /// B field value and its type
-    static constexpr vector3 B{2 * detray::unit<scalar>::T, 0, 0};
-
     /// Plane material and thickness
     static const inline detray::silicon_tml<scalar> mat = {};
-    static constexpr scalar thickness = 0.5f * detray::unit<scalar>::mm;
+    static constexpr scalar thickness = 0.5f * traccc::unit<scalar>::mm;
 
     // Rectangle mask for the telescope geometry
-    static constexpr detray::mask<detray::rectangle2D> rectangle{0u, 100000.f,
-                                                                 100000.f};
+    static constexpr detray::mask<detray::rectangle2D, traccc::default_algebra>
+        rectangle{0u, 100000.f, 100000.f};
 
     /// Measurement smearing parameters
     static constexpr std::array<scalar, 2u> smearing{
-        50 * detray::unit<scalar>::um, 50 * detray::unit<scalar>::um};
+        50 * traccc::unit<scalar>::um, 50 * traccc::unit<scalar>::um};
 
     /// Standard deviations for seed track parameters
     static constexpr std::array<scalar, e_bound_size> stddevs = {
-        0.03f * detray::unit<scalar>::mm,
-        0.03f * detray::unit<scalar>::mm,
+        0.1f * traccc::unit<scalar>::mm,
+        0.1f * traccc::unit<scalar>::mm,
         0.017f,
         0.017f,
-        0.001f / detray::unit<scalar>::GeV,
-        1.f * detray::unit<scalar>::ns};
+        0.05f / traccc::unit<scalar>::GeV,
+        1.f * traccc::unit<scalar>::ns};
+
+    void consistency_tests(const track_candidate_collection_types::host&
+                               track_candidates_per_track) const {
+
+        // The nubmer of track candidates is supposed be equal to the number
+        // of planes
+        ASSERT_EQ(track_candidates_per_track.size(), std::get<11>(GetParam()));
+    }
 
     void consistency_tests(const track_state_collection_types::host&
                                track_states_per_track) const {
@@ -96,7 +102,7 @@ class KalmanFittingTelescopeTests
                                           unit<scalar>::mm);
         }
 
-        detray::tel_det_config<> tel_cfg{rectangle};
+        detray::tel_det_config tel_cfg{rectangle};
         tel_cfg.positions(plane_positions);
         tel_cfg.module_material(mat);
         tel_cfg.mat_thickness(thickness);

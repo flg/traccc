@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2024 CERN for the benefit of the ACTS project
+ * (c) 2024-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -8,8 +8,10 @@
 // Local include(s).
 #include "traccc/options/accelerator.hpp"
 
+#include "traccc/examples/utils/printable.hpp"
+
 // System include(s).
-#include <iostream>
+#include <format>
 
 namespace traccc::opts {
 
@@ -20,10 +22,13 @@ accelerator::accelerator() : interface("Accelerator Options") {
                          "Compare accelerator output with that of the CPU");
 }
 
-std::ostream& accelerator::print_impl(std::ostream& out) const {
+std::unique_ptr<configuration_printable> accelerator::as_printable() const {
+    auto cat = std::make_unique<configuration_category>(m_description);
 
-    out << "  Compare with CPU results: " << (compare_with_cpu ? "yes" : "no");
-    return out;
+    cat->add_child(std::make_unique<configuration_kv_pair>(
+        "Compare with CPU output", std::format("{}", compare_with_cpu)));
+
+    return cat;
 }
 
 }  // namespace traccc::opts

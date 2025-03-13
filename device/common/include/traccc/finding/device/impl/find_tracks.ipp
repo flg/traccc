@@ -1,34 +1,41 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023 CERN for the benefit of the ACTS project
+ * (c) 2023-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
 
 #pragma once
 
-// Project include(s).
-#include "traccc/definitions/primitives.hpp"
-#include "traccc/definitions/qualifiers.hpp"
-#include "traccc/device/concepts/barrier.hpp"
-#include "traccc/device/concepts/thread_id.hpp"
-#include "traccc/edm/measurement.hpp"
-#include "traccc/edm/track_parameters.hpp"
-#include "traccc/edm/track_state.hpp"
-#include "traccc/finding/candidate_link.hpp"
-#include "traccc/finding/finding_config.hpp"
-#include "traccc/fitting/kalman_filter/gain_matrix_updater.hpp"
+// HACK: Fix for intel/llvm#15544
+// As of Intel LLVM 2025.0, enabling an AMD SYCL target inadvertently sets the
+// `__CUDA_ARCH__` preprocessor definition which breaks all sorts of internal
+// logic in Thrust. Thus, we very selectively undefine the `__CUDA_ARCH__`
+// definition when we are are compiling SYCL code using the Intel LLVM
+// compiler. This can be removed when intel/llvm#15443 makes it into a OneAPI
+// release.
+#if defined(__INTEL_LLVM_COMPILER) && defined(SYCL_LANGUAGE_VERSION)
+#undef __CUDA_ARCH__
+#endif
 
-// Thrust include(s)
+// Project include(s).
+#include "traccc/fitting/kalman_filter/gain_matrix_updater.hpp"
+#include "traccc/fitting/status_codes.hpp"
+
+// Detray include(s)
+#include <detray/geometry/tracking_surface.hpp>
+
+// Thrust include(s).
 #include <thrust/binary_search.h>
+#include <thrust/execution_policy.h>
 
 namespace traccc::device {
 
-template <concepts::thread_id1 thread_id_t, concepts::barrier barrier_t,
-          typename detector_t, typename config_t>
+template <typename detector_t, concepts::thread_id1 thread_id_t,
+          concepts::barrier barrier_t>
 TRACCC_DEVICE inline void find_tracks(
-    thread_id_t& thread_id, barrier_t& barrier, const config_t cfg,
-    const find_tracks_payload<detector_t>& payload,
+    const thread_id_t& thread_id, const barrier_t& barrier,
+    const finding_config& cfg, const find_tracks_payload<detector_t>& payload,
     const find_tracks_shared_payload& shared_payload) {
 
     /*
@@ -61,8 +68,9 @@ TRACCC_DEVICE inline void find_tracks(
     vecmem::device_vector<unsigned int> out_params_liveness(
         payload.out_params_liveness_view);
     vecmem::device_vector<candidate_link> links(payload.links_view);
-    vecmem::device_atomic_ref<unsigned int> num_total_candidates(
-        *payload.n_total_candidates);
+    vecmem::device_atomic_ref<unsigned int,
+                              vecmem::device_address_space::global>
+        num_total_candidates(*payload.n_total_candidates);
     vecmem::device_vector<const detray::geometry::barcode> barcodes(
         payload.barcodes_view);
     vecmem::device_vector<const unsigned int> upper_bounds(
@@ -114,7 +122,10 @@ TRACCC_DEVICE inline void find_tracks(
          * this thread.
          */
         else {
-            const auto bcd_id = std::distance(barcodes.begin(), lo);
+            const vecmem::device_vector<const unsigned int>::size_type bcd_id =
+                static_cast<
+                    vecmem::device_vector<const unsigned int>::size_type>(
+                    std::distance(barcodes.begin(), lo));
 
             init_meas = lo == barcodes.begin() ? 0u : upper_bounds[bcd_id - 1];
             num_meas = upper_bounds[bcd_id] - init_meas;
@@ -154,9 +165,11 @@ TRACCC_DEVICE inline void find_tracks(
         for (; curr_meas < num_meas &&
                shared_payload.shared_candidates_size < thread_id.getBlockDimX();
              curr_meas++) {
-            unsigned int idx = vecmem::device_atomic_ref<unsigned int>(
-                                   shared_payload.shared_candidates_size)
-                                   .fetch_add(1u);
+            unsigned int idx =
+                vecmem::device_atomic_ref<unsigned int,
+                                          vecmem::device_address_space::local>(
+                    shared_payload.shared_candidates_size)
+                    .fetch_add(1u);
 
             /*
              * The buffer elemements are tuples of the measurement index and
@@ -182,7 +195,7 @@ TRACCC_DEVICE inline void find_tracks(
                 owner_local_thread_id +
                 thread_id.getBlockDimX() * thread_id.getBlockIdX();
             assert(in_params_liveness.at(owner_global_thread_id) != 0u);
-            const bound_track_parameters& in_par =
+            const bound_track_parameters<>& in_par =
                 in_params.at(owner_global_thread_id);
             const unsigned int meas_idx =
                 shared_payload.shared_candidates[thread_id.getLocalThreadIdX()]
@@ -194,14 +207,19 @@ TRACCC_DEVICE inline void find_tracks(
             const detray::tracking_surface sf{det, in_par.surface_link()};
 
             // Run the Kalman update
-            const bool res = sf.template visit_mask<
+            const kalman_fitter_status res = sf.template visit_mask<
                 gain_matrix_updater<typename detector_t::algebra_type>>(
                 trk_state, in_par);
 
+            const traccc::scalar chi2 = trk_state.filtered_chi2();
+
             // The chi2 from Kalman update should be less than chi2_max
-            if (res && trk_state.filtered_chi2() < cfg.chi2_max) {
+            if (res == kalman_fitter_status::SUCCESS &&
+                trk_state.filtered_chi2() < cfg.chi2_max) {
                 // Add measurement candidates to link
                 const unsigned int l_pos = num_total_candidates.fetch_add(1);
+
+                assert(trk_state.filtered_chi2() >= 0.f);
 
                 if (l_pos >= payload.n_max_candidates) {
                     *payload.n_total_candidates = payload.n_max_candidates;
@@ -211,7 +229,8 @@ TRACCC_DEVICE inline void find_tracks(
                             {previous_step, owner_global_thread_id},
                             meas_idx,
                             owner_global_thread_id,
-                            0};
+                            0,
+                            chi2};
                     } else {
                         const candidate_link& prev_link =
                             prev_links[owner_global_thread_id];
@@ -220,12 +239,14 @@ TRACCC_DEVICE inline void find_tracks(
                             {previous_step, owner_global_thread_id},
                             meas_idx,
                             prev_link.seed_idx,
-                            prev_link.n_skipped};
+                            prev_link.n_skipped,
+                            chi2};
                     }
 
                     // Increase the number of candidates (or branches) per input
                     // parameter
-                    vecmem::device_atomic_ref<unsigned int>(
+                    vecmem::device_atomic_ref<
+                        unsigned int, vecmem::device_address_space::local>(
                         shared_payload
                             .shared_num_candidates[owner_local_thread_id])
                         .fetch_add(1u);
@@ -276,14 +297,16 @@ TRACCC_DEVICE inline void find_tracks(
                 links.at(l_pos) = {{previous_step, in_param_id},
                                    std::numeric_limits<unsigned int>::max(),
                                    in_param_id,
-                                   1};
+                                   1,
+                                   std::numeric_limits<traccc::scalar>::max()};
             } else {
                 const candidate_link& prev_link = prev_links[in_param_id];
 
                 links.at(l_pos) = {{previous_step, in_param_id},
                                    std::numeric_limits<unsigned int>::max(),
                                    prev_link.seed_idx,
-                                   prev_link.n_skipped + 1};
+                                   prev_link.n_skipped + 1,
+                                   std::numeric_limits<traccc::scalar>::max()};
             }
 
             out_params.at(l_pos) = in_params.at(in_param_id);

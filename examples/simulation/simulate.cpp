@@ -8,6 +8,7 @@
 // Project include(s).
 #include "traccc/definitions/primitives.hpp"
 #include "traccc/edm/track_parameters.hpp"
+#include "traccc/geometry/detector.hpp"
 #include "traccc/io/utils.hpp"
 #include "traccc/options/detector.hpp"
 #include "traccc/options/generation.hpp"
@@ -19,14 +20,12 @@
 #include "traccc/simulation/smearing_writer.hpp"
 
 // Detray include(s).
-#include "detray/core/detector.hpp"
-#include "detray/core/detector_metadata.hpp"
-#include "detray/detectors/bfield.hpp"
-#include "detray/io/frontend/detector_reader.hpp"
-#include "detray/navigation/navigator.hpp"
-#include "detray/propagator/propagator.hpp"
-#include "detray/propagator/rk_stepper.hpp"
-#include "detray/test/utils/simulation/event_generator/track_generators.hpp"
+#include <detray/detectors/bfield.hpp>
+#include <detray/io/frontend/detector_reader.hpp>
+#include <detray/navigation/navigator.hpp>
+#include <detray/propagator/propagator.hpp>
+#include <detray/propagator/rk_stepper.hpp>
+#include <detray/test/utils/simulation/event_generator/track_generators.hpp>
 
 // VecMem include(s).
 #include <vecmem/memory/host_memory_resource.hpp>
@@ -39,6 +38,8 @@ using namespace traccc;
 // The main routine
 //
 int main(int argc, char* argv[]) {
+    std::unique_ptr<const traccc::Logger> logger = traccc::getDefaultLogger(
+        "TracccExampleSimulate", traccc::Logging::Level::INFO);
 
     // Program options.
     traccc::opts::detector det_opts;
@@ -49,22 +50,24 @@ int main(int argc, char* argv[]) {
         "Detector Simulation",
         {det_opts, generation_opts, output_opts, propagation_opts},
         argc,
-        argv};
+        argv,
+        logger->cloneWithSuffix("Options")};
 
     /// Type declarations
-    using host_detector_type = detray::detector<>;
+    using host_detector_type = traccc::default_detector::host;
     using uniform_gen_t =
         detray::detail::random_numbers<scalar,
                                        std::uniform_real_distribution<scalar>>;
     using generator_type =
-        detray::random_track_generator<traccc::free_track_parameters,
+        detray::random_track_generator<traccc::free_track_parameters<>,
                                        uniform_gen_t>;
 
     // B field value and its type
     // @TODO: Set B field as argument
-    using b_field_t = covfie::field<detray::bfield::const_bknd_t>;
-    const traccc::vector3 B{0, 0, 2 * detray::unit<traccc::scalar>::T};
-    auto field = detray::bfield::create_const_field(B);
+    using b_field_t =
+        covfie::field<detray::bfield::const_bknd_t<traccc::scalar>>;
+    const traccc::vector3 B{0, 0, 2 * traccc::unit<traccc::scalar>::T};
+    auto field = detray::bfield::create_const_field<traccc::scalar>(B);
 
     // Read the detector
     detray::io::detector_reader_config reader_cfg{};
@@ -103,7 +106,7 @@ int main(int argc, char* argv[]) {
 
     // Smearing value for measurements
     traccc::measurement_smearer<traccc::default_algebra> meas_smearer(
-        50 * detray::unit<scalar>::um, 50 * detray::unit<scalar>::um);
+        50 * traccc::unit<scalar>::um, 50 * traccc::unit<scalar>::um);
 
     using writer_type = traccc::smearing_writer<
         traccc::measurement_smearer<traccc::default_algebra>>;

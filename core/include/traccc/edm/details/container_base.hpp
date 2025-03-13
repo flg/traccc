@@ -10,12 +10,10 @@
 // Project include(s).
 #include "traccc/definitions/qualifiers.hpp"
 #include "traccc/edm/details/container_element.hpp"
+#include "traccc/utils/pair.hpp"
 
 // VecMem include(s).
 #include <vecmem/memory/memory_resource.hpp>
-
-// Thrust include(s).
-#include <thrust/pair.h>
 
 // System include(s).
 #include <cassert>
@@ -38,7 +36,7 @@ namespace traccc {
 template <typename header_t, typename item_t,
           template <typename> class vector_t,
           template <typename> class jagged_vector_t,
-          template <typename, typename> class pair_t = thrust::pair>
+          template <typename, typename> class pair_t = traccc::pair>
 class container_base {
     public:
     /// @name Type definitions
@@ -139,13 +137,11 @@ class container_base {
     /**
      * @brief Constructor from a pair of "view type" objects
      */
-    template <typename header_vector_tp, typename item_vector_tp,
-              typename = std::enable_if<
-                  std::is_same<header_vector_tp, header_vector>::value>,
-              typename = std::enable_if<
-                  std::is_same<item_vector_tp, item_vector>::value>>
-    TRACCC_HOST_DEVICE container_base(const header_vector_tp& hv,
-                                      const item_vector_tp& iv)
+    template <typename header_vector_tp, typename item_vector_tp>
+    requires(std::constructible_from<header_vector, const header_vector_tp&>&&
+                 std::constructible_from<item_vector, const item_vector_tp&>)
+        TRACCC_HOST_DEVICE
+        container_base(const header_vector_tp& hv, const item_vector_tp& iv)
         : m_headers(hv), m_items(iv) {
 
         assert(m_headers.size() == m_items.size());

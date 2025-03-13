@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023-2024 CERN for the benefit of the ACTS project
+ * (c) 2023-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -9,6 +9,7 @@
 #include "../sanity/contiguous_on.cuh"
 #include "../utils/barrier.hpp"
 #include "../utils/cuda_error_handling.hpp"
+#include "../utils/thread_id.hpp"
 #include "../utils/utils.hpp"
 #include "./kernels/apply_interaction.cuh"
 #include "./kernels/build_tracks.cuh"
@@ -18,27 +19,25 @@
 #include "./kernels/propagate_to_next_surface.cuh"
 #include "./kernels/prune_tracks.cuh"
 #include "traccc/cuda/finding/finding_algorithm.hpp"
-#include "traccc/cuda/utils/thread_id.hpp"
 #include "traccc/definitions/primitives.hpp"
 #include "traccc/definitions/qualifiers.hpp"
 #include "traccc/edm/device/sort_key.hpp"
 #include "traccc/finding/candidate_link.hpp"
+#include "traccc/geometry/detector.hpp"
 #include "traccc/utils/projections.hpp"
 
 // detray include(s).
-#include "detray/core/detector.hpp"
-#include "detray/core/detector_metadata.hpp"
-#include "detray/detectors/bfield.hpp"
-#include "detray/navigation/navigator.hpp"
-#include "detray/propagator/rk_stepper.hpp"
-#include "vecmem/containers/data/vector_view.hpp"
-#include "vecmem/memory/unique_ptr.hpp"
+#include <detray/detectors/bfield.hpp>
+#include <detray/navigation/navigator.hpp>
+#include <detray/propagator/rk_stepper.hpp>
 
 // VecMem include(s).
 #include <vecmem/containers/data/vector_buffer.hpp>
+#include <vecmem/containers/data/vector_view.hpp>
 #include <vecmem/containers/device_vector.hpp>
 #include <vecmem/containers/jagged_device_vector.hpp>
 #include <vecmem/containers/vector.hpp>
+#include <vecmem/memory/unique_ptr.hpp>
 
 // Thrust include(s).
 #include <thrust/copy.h>
@@ -50,6 +49,7 @@
 
 // System include(s).
 #include <cassert>
+#include <memory_resource>
 #include <vector>
 
 namespace traccc::cuda {
@@ -57,8 +57,9 @@ namespace traccc::cuda {
 template <typename stepper_t, typename navigator_t>
 finding_algorithm<stepper_t, navigator_t>::finding_algorithm(
     const config_type& cfg, const traccc::memory_resource& mr,
-    vecmem::copy& copy, stream& str)
-    : m_cfg(cfg),
+    vecmem::copy& copy, stream& str, std::unique_ptr<const Logger> logger)
+    : messaging(std::move(logger)),
+      m_cfg(cfg),
       m_mr(mr),
       m_copy(copy),
       m_stream(str),
@@ -77,6 +78,11 @@ finding_algorithm<stepper_t, navigator_t>::operator()(
 
     // Copy setup
     m_copy.setup(seeds_buffer)->ignore();
+
+    // The Thrust policy to use.
+    auto thrust_policy =
+        thrust::cuda::par_nosync(std::pmr::polymorphic_allocator(&(m_mr.main)))
+            .on(stream);
 
     /*****************************************************************
      * Measurement Operations
@@ -98,10 +104,11 @@ finding_algorithm<stepper_t, navigator_t>::operator()(
 
         measurement_collection_types::device uniques(uniques_buffer);
 
-        measurement* uniques_end = thrust::unique_copy(
-            thrust::cuda::par.on(stream), measurements.ptr(),
-            measurements.ptr() + n_measurements, uniques.begin(),
-            measurement_equal_comp());
+        measurement* uniques_end =
+            thrust::unique_copy(thrust_policy, measurements.ptr(),
+                                measurements.ptr() + n_measurements,
+                                uniques.begin(), measurement_equal_comp());
+        m_stream.synchronize();
         n_modules = static_cast<unsigned int>(uniques_end - uniques.begin());
     }
 
@@ -115,7 +122,7 @@ finding_algorithm<stepper_t, navigator_t>::operator()(
 
         measurement_collection_types::device uniques(uniques_buffer);
 
-        thrust::upper_bound(thrust::cuda::par.on(stream), measurements.ptr(),
+        thrust::upper_bound(thrust_policy, measurements.ptr(),
                             measurements.ptr() + n_measurements,
                             uniques.begin(), uniques.begin() + n_modules,
                             upper_bounds.begin(), measurement_sort_comp());
@@ -189,8 +196,8 @@ finding_algorithm<stepper_t, navigator_t>::operator()(
 
             kernels::apply_interaction<std::decay_t<detector_type>>
                 <<<nBlocks, nThreads, 0, stream>>>(
-                    m_cfg, {det_view, static_cast<int>(n_in_params),
-                            in_params_buffer, param_liveness_buffer});
+                    m_cfg, {det_view, n_in_params, in_params_buffer,
+                            param_liveness_buffer});
             TRACCC_CUDA_ERROR_CHECK(cudaGetLastError());
         }
 
@@ -283,8 +290,8 @@ finding_algorithm<stepper_t, navigator_t>::operator()(
                     keys_buffer);
                 vecmem::device_vector<unsigned int> param_ids_device(
                     param_ids_buffer);
-                thrust::sort_by_key(thrust::cuda::par.on(stream),
-                                    keys_device.begin(), keys_device.end(),
+                thrust::sort_by_key(thrust_policy, keys_device.begin(),
+                                    keys_device.end(),
                                     param_ids_device.begin());
 
                 m_stream.synchronize();
@@ -333,7 +340,7 @@ finding_algorithm<stepper_t, navigator_t>::operator()(
         vecmem::device_vector<candidate_link> out(
             *(links_buffer.host_ptr() + it));
 
-        thrust::copy(thrust::cuda::par.on(stream), in.begin(),
+        thrust::copy(thrust_policy, in.begin(),
                      in.begin() + n_candidates_per_step[it], out.begin());
     }
 
@@ -358,7 +365,7 @@ finding_algorithm<stepper_t, navigator_t>::operator()(
     vecmem::data::vector_buffer<unsigned int> valid_indices_buffer(n_tips_total,
                                                                    m_mr.main);
 
-    unsigned int n_valid_tracks;
+    unsigned int n_valid_tracks = 0;
 
     // @Note: nBlocks can be zero in case there is no tip. This happens when
     // chi2_max config is set tightly and no tips are found
@@ -409,11 +416,12 @@ finding_algorithm<stepper_t, navigator_t>::operator()(
 }
 
 // Explicit template instantiation
-using default_detector_type =
-    detray::detector<detray::default_metadata, detray::device_container_types>;
-using default_stepper_type =
-    detray::rk_stepper<covfie::field<detray::bfield::const_bknd_t>::view_t,
-                       traccc::default_algebra, detray::constrained_step<>>;
+using default_detector_type = traccc::default_detector::device;
+using default_stepper_type = detray::rk_stepper<
+    covfie::field<detray::bfield::const_bknd_t<
+        default_detector_type::scalar_type>>::view_t,
+    default_detector_type::algebra_type,
+    detray::constrained_step<default_detector_type::scalar_type>>;
 using default_navigator_type = detray::navigator<const default_detector_type>;
 template class finding_algorithm<default_stepper_type, default_navigator_type>;
 

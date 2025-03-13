@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2024 CERN for the benefit of the ACTS project
+ * (c) 2024-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -25,11 +25,11 @@ class input_data : public interface {
     /// @{
 
     // Use acts geometry source
-    bool use_acts_geom_source = false;
+    bool use_acts_geom_source = true;
     /// The data format of the input files
     traccc::data_format format = data_format::csv;
     /// Directory of the input files
-    std::string directory = "tml_full/ttbar_mu20/";
+    std::string directory = "odd/geant4_10muon_10GeV/";
     /// The number of events to process
     std::size_t events = 1;
     /// The number of events to skip
@@ -46,10 +46,7 @@ class input_data : public interface {
     ///
     void read(const boost::program_options::variables_map& vm) override;
 
-    private:
-    /// Print the specific options of this class
-    std::ostream& print_impl(std::ostream& out) const override;
-
+    std::unique_ptr<configuration_printable> as_printable() const override;
 };  // class input_data
 
 }  // namespace traccc::opts

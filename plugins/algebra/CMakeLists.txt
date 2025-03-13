@@ -4,10 +4,6 @@
 #
 # Mozilla Public License Version 2.0
 
-# Temporary setting for the traccc::scalar type, until it can be removed.
-set( TRACCC_CUSTOM_SCALARTYPE "float" CACHE STRING
-   "Scalar type to use in the TRACCC code" )
-
 # Declare the traccc::algebra library.
 traccc_add_library( traccc_algebra algebra TYPE INTERFACE )
 
@@ -33,6 +29,6 @@ endif()
 
 # Make use of algebra::vc_aos, if it is available.
 if( ALGEBRA_PLUGINS_INCLUDE_VC )
-  add_subdirectory( vc )
+  add_subdirectory( vc_aos )
   target_link_libraries( traccc_algebra INTERFACE traccc::vc_aos )
 endif()

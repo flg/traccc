@@ -16,15 +16,15 @@
 #include "traccc/simulation/simulator.hpp"
 #include "traccc/utils/event_data.hpp"
 #include "traccc/utils/ranges.hpp"
+#include "traccc/utils/seed_generator.hpp"
 
 // Test include(s).
 #include "tests/ckf_toy_detector_test.hpp"
-#include "traccc/utils/seed_generator.hpp"
 
 // detray include(s).
-#include "detray/io/frontend/detector_reader.hpp"
-#include "detray/propagator/propagator.hpp"
-#include "detray/test/utils/simulation/event_generator/track_generators.hpp"
+#include <detray/io/frontend/detector_reader.hpp>
+#include <detray/propagator/propagator.hpp>
+#include <detray/test/utils/simulation/event_generator/track_generators.hpp>
 
 // VecMem include(s).
 #include <vecmem/memory/cuda/device_memory_resource.hpp>
@@ -70,7 +70,8 @@ TEST_P(CkfToyDetectorTests, Run) {
     auto [host_det, names] =
         detray::io::read_detector<host_detector_type>(mng_mr, reader_cfg);
 
-    auto field = detray::bfield::create_const_field(B);
+    auto field =
+        detray::bfield::create_const_field<host_detector_type::scalar_type>(B);
 
     // Detector view object
     auto det_view = detray::get_data(host_det);
@@ -81,7 +82,7 @@ TEST_P(CkfToyDetectorTests, Run) {
 
     // Track generator
     using generator_type =
-        detray::random_track_generator<traccc::free_track_parameters,
+        detray::random_track_generator<traccc::free_track_parameters<>,
                                        uniform_gen_t>;
     generator_type::configuration gen_cfg{};
     gen_cfg.n_tracks(n_truth_tracks);
@@ -110,7 +111,6 @@ TEST_P(CkfToyDetectorTests, Run) {
                                  writer_type>(
         ptc, n_events, host_det, field, std::move(generator),
         std::move(smearer_writer_cfg), full_path);
-    sim.get_config().propagation.stepping.step_constraint = step_constraint;
     sim.get_config().propagation.navigation.search_window = search_window;
     sim.run();
 
@@ -139,7 +139,6 @@ TEST_P(CkfToyDetectorTests, Run) {
         rk_stepper_type, device_navigator_type>::config_type cfg;
     cfg.ptc_hypothesis = ptc;
     cfg.max_num_branches_per_seed = 500;
-    cfg.chi2_max = 30.f;
     cfg.propagation.navigation.search_window = search_window;
 
     // Finding algorithm object
@@ -163,7 +162,8 @@ TEST_P(CkfToyDetectorTests, Run) {
         // Prepare truth seeds
         traccc::bound_track_parameters_collection_types::host seeds(&host_mr);
         for (unsigned int i_trk = 0; i_trk < n_truth_tracks; i_trk++) {
-            seeds.push_back(truth_track_candidates.at(i_trk).header);
+            seeds.push_back(
+                truth_track_candidates.at(i_trk).header.seed_params);
         }
         ASSERT_EQ(seeds.size(), n_truth_tracks);
 
@@ -213,11 +213,15 @@ TEST_P(CkfToyDetectorTests, Run) {
         // Make sure that the outputs from cpu and cuda CKF are equivalent
         unsigned int n_matches = 0u;
         for (unsigned int i = 0u; i < track_candidates.size(); i++) {
-            auto iso =
+            auto iso_header =
+                traccc::details::is_same_object(track_candidates.at(i).header);
+
+            auto iso_items =
                 traccc::details::is_same_object(track_candidates.at(i).items);
 
             for (unsigned int j = 0u; j < track_candidates_cuda.size(); j++) {
-                if (iso(track_candidates_cuda.at(j).items)) {
+                if (iso_header(track_candidates_cuda.at(j).header) &&
+                    iso_items(track_candidates_cuda.at(j).items)) {
                     n_matches++;
                     break;
                 }
@@ -240,22 +244,22 @@ INSTANTIATE_TEST_SUITE_P(
                         std::array<scalar, 3u>{0.f, 0.f, 0.f},
                         std::array<scalar, 2u>{1.f, 100.f},
                         std::array<scalar, 2u>{-4.f, 4.f},
-                        std::array<scalar, 2u>{-detray::constant<scalar>::pi,
-                                               detray::constant<scalar>::pi},
+                        std::array<scalar, 2u>{-traccc::constant<scalar>::pi,
+                                               traccc::constant<scalar>::pi},
                         detray::muon<scalar>(), 1, 1, false),
         std::make_tuple("toy_n_particles_10000",
                         std::array<scalar, 3u>{0.f, 0.f, 0.f},
                         std::array<scalar, 3u>{0.f, 0.f, 0.f},
                         std::array<scalar, 2u>{1.f, 100.f},
                         std::array<scalar, 2u>{-4.f, 4.f},
-                        std::array<scalar, 2u>{-detray::constant<scalar>::pi,
-                                               detray::constant<scalar>::pi},
+                        std::array<scalar, 2u>{-traccc::constant<scalar>::pi,
+                                               traccc::constant<scalar>::pi},
                         detray::muon<scalar>(), 10000, 1, false),
         std::make_tuple("toy_n_particles_10000_random_charge",
                         std::array<scalar, 3u>{0.f, 0.f, 0.f},
                         std::array<scalar, 3u>{0.f, 0.f, 0.f},
                         std::array<scalar, 2u>{1.f, 100.f},
                         std::array<scalar, 2u>{-4.f, 4.f},
-                        std::array<scalar, 2u>{-detray::constant<scalar>::pi,
-                                               detray::constant<scalar>::pi},
+                        std::array<scalar, 2u>{-traccc::constant<scalar>::pi,
+                                               traccc::constant<scalar>::pi},
                         detray::muon<scalar>(), 10000, 1, true)));

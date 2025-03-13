@@ -1,11 +1,12 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2021-2024 CERN for the benefit of the ACTS project
+ * (c) 2021-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
 
 // Project include(s).
+#include "traccc/geometry/detector.hpp"
 #include "traccc/io/details/read_surfaces.hpp"
 #include "traccc/io/read_cells.hpp"
 #include "traccc/io/read_detector.hpp"
@@ -36,7 +37,8 @@ TEST_F(io, csv_read_single_module) {
     vecmem::host_memory_resource resource;
 
     traccc::edm::silicon_cell_collection::host cells{resource};
-    traccc::io::read_cells(cells, get_datafile("single_module/cells.csv"));
+    traccc::io::read_cells(cells, get_datafile("single_module/cells.csv"),
+                           traccc::getDummyLogger().clone());
 
     ASSERT_EQ(cells.size(), 6u);
 
@@ -57,7 +59,8 @@ TEST_F(io, csv_read_two_modules) {
     vecmem::host_memory_resource resource;
 
     traccc::edm::silicon_cell_collection::host cells{resource};
-    traccc::io::read_cells(cells, get_datafile("two_modules/cells.csv"));
+    traccc::io::read_cells(cells, get_datafile("two_modules/cells.csv"),
+                           traccc::getDummyLogger().clone());
 
     ASSERT_EQ(cells.size(), 14u);
 
@@ -91,7 +94,8 @@ TEST_F(io, csv_read_tml_pixelbarrel) {
     traccc::edm::silicon_cell_collection::host cells{resource};
     traccc::io::read_cells(
         cells, get_datafile("tml_pixel_barrel/event000000000-cells.csv"),
-        nullptr, traccc::data_format::csv, false);
+        traccc::getDummyLogger().clone(), nullptr, traccc::data_format::csv,
+        false);
 
     EXPECT_EQ(cells.size(), 179961u);
 }
@@ -108,15 +112,11 @@ TEST_F(io, csv_read_tml_single_muon) {
         traccc::data_format::csv);
 
     // Read the hits from the relevant event file
-    traccc::spacepoint_collection_types::host spacepoints_per_event(&resource);
-    traccc::io::read_spacepoints(spacepoints_per_event, 0,
-                                 "tml_full/single_muon/");
-
-    // Read the measurements from the relevant event file
-    traccc::measurement_collection_types::host measurements_per_event(
-        &resource);
-    traccc::io::read_measurements(measurements_per_event, 0,
-                                  "tml_full/single_muon/", nullptr);
+    traccc::measurement_collection_types::host measurements_per_event{
+        &resource};
+    traccc::edm::spacepoint_collection::host spacepoints_per_event(resource);
+    traccc::io::read_spacepoints(spacepoints_per_event, measurements_per_event,
+                                 0, "tml_full/single_muon/");
 
     // Read the particles from the relevant event file
     traccc::particle_collection_types::host particles_per_event(&resource);
@@ -189,7 +189,8 @@ TEST_F(io, csv_write_odd_single_muon_cells) {
         for (std::size_t event = 0; event < 10; ++event) {
 
             // Read the cells for the current event.
-            traccc::io::read_cells(orig, event, "odd/geant4_1muon_1GeV/", &dd);
+            traccc::io::read_cells(orig, event, "odd/geant4_1muon_1GeV/",
+                                   traccc::getDummyLogger().clone(), &dd);
 
             // Write the cells into a temporary file.
             traccc::io::write(event,
@@ -200,7 +201,8 @@ TEST_F(io, csv_write_odd_single_muon_cells) {
             // Read the cells back in.
             traccc::io::read_cells(
                 copy, event, std::filesystem::temp_directory_path().native(),
-                &dd, traccc::data_format::csv, false, use_acts_geometry_id);
+                traccc::getDummyLogger().clone(), &dd, traccc::data_format::csv,
+                false, use_acts_geometry_id);
 
             // Compare the two cell collections.
             compare_cells(orig, copy);

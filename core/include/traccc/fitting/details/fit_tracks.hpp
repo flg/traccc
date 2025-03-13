@@ -10,6 +10,7 @@
 // Project include(s).
 #include "traccc/edm/track_candidate.hpp"
 #include "traccc/edm/track_state.hpp"
+#include "traccc/fitting/status_codes.hpp"
 
 // VecMem include(s).
 #include <vecmem/memory/memory_resource.hpp>
@@ -58,15 +59,19 @@ track_state_container_types::host fit_tracks(
         }
 
         // Make a fitter state
-        typename fitter_t::state fitter_state(std::move(input_states));
+        typename fitter_t::state fitter_state(vecmem::get_data(input_states));
 
         // Run the fitter.
-        fitter.fit(track_candidates.get_headers()[i], fitter_state);
+        kalman_fitter_status fit_status = fitter.fit(
+            track_candidates.get_headers()[i].seed_params, fitter_state);
 
-        // Save the results into the output container.
-        result.push_back(
-            std::move(fitter_state.m_fit_res),
-            std::move(fitter_state.m_fit_actor_state.m_track_states));
+        if (fit_status == kalman_fitter_status::SUCCESS) {
+            // Save the results into the output container.
+            result.push_back(std::move(fitter_state.m_fit_res),
+                             std::move(input_states));
+        } else {
+            // TODO: Print a warning here.
+        }
     }
 
     // Return the fitted track states.

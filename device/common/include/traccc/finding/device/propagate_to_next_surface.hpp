@@ -1,21 +1,28 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023 CERN for the benefit of the ACTS project
+ * (c) 2023-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
 
 #pragma once
 
+// Local include(s).
+#include "traccc/device/global_index.hpp"
+
 // Project include(s).
-#include "traccc/definitions/primitives.hpp"
 #include "traccc/definitions/qualifiers.hpp"
-#include "traccc/edm/measurement.hpp"
 #include "traccc/edm/track_parameters.hpp"
 #include "traccc/finding/candidate_link.hpp"
-#include "traccc/utils/particle.hpp"
+#include "traccc/finding/finding_config.hpp"
+
+// VecMem include(s).
+#include <vecmem/containers/data/vector_view.hpp>
 
 namespace traccc::device {
+
+/// (Event Data) Payload for the @c traccc::device::propagate_to_next_surface
+/// function
 template <typename propagator_t, typename bfield_t>
 struct propagate_to_next_surface_payload {
     /**
@@ -41,7 +48,7 @@ struct propagate_to_next_surface_payload {
     /**
      * @brief View object to the access order of parameters so they are sorted
      */
-    const vecmem::data::vector_view<const unsigned int> param_ids_view;
+    vecmem::data::vector_view<const unsigned int> param_ids_view;
 
     /**
      * @brief View object to the vector of candidate links
@@ -51,12 +58,12 @@ struct propagate_to_next_surface_payload {
     /**
      * @brief Current CKF step number
      */
-    const unsigned int step;
+    unsigned int step;
 
     /**
      * @brief Total number of input track parameters
      */
-    const unsigned int n_in_params;
+    unsigned int n_in_params;
 
     /**
      * @brief View object to the vector of tips
@@ -81,10 +88,13 @@ struct propagate_to_next_surface_payload {
 /// @param[in] globalIndex        The index of the current thread
 /// @param[in] cfg                Track finding config object
 /// @param[inout] payload      The function call payload
-template <typename propagator_t, typename bfield_t, typename config_t>
+///
+template <typename propagator_t, typename bfield_t>
 TRACCC_DEVICE inline void propagate_to_next_surface(
-    std::size_t globalIndex, const config_t cfg,
+    global_index_t globalIndex, const finding_config& cfg,
     const propagate_to_next_surface_payload<propagator_t, bfield_t>& payload);
+
 }  // namespace traccc::device
 
+// Include the implementation.
 #include "./impl/propagate_to_next_surface.ipp"

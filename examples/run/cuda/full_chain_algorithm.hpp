@@ -23,13 +23,14 @@
 #include "traccc/geometry/detector.hpp"
 #include "traccc/geometry/silicon_detector_description.hpp"
 #include "traccc/utils/algorithm.hpp"
+#include "traccc/utils/messaging.hpp"
 
 // Detray include(s).
-#include "detray/core/detector.hpp"
-#include "detray/detectors/bfield.hpp"
-#include "detray/navigation/navigator.hpp"
-#include "detray/propagator/propagator.hpp"
-#include "detray/propagator/rk_stepper.hpp"
+#include <detray/core/detector.hpp>
+#include <detray/detectors/bfield.hpp>
+#include <detray/navigation/navigator.hpp>
+#include <detray/propagator/propagator.hpp>
+#include <detray/propagator/rk_stepper.hpp>
 
 // VecMem include(s).
 #include <vecmem/containers/vector.hpp>
@@ -49,7 +50,8 @@ namespace traccc::cuda {
 ///
 class full_chain_algorithm
     : public algorithm<vecmem::vector<fitting_result<default_algebra>>(
-          const edm::silicon_cell_collection::host&)> {
+          const edm::silicon_cell_collection::host&)>,
+      public messaging {
 
     public:
     /// @name Type declaration(s)
@@ -60,11 +62,13 @@ class full_chain_algorithm
     /// (Device) Detector type used during track finding and fitting
     using device_detector_type = traccc::default_detector::device;
 
+    using scalar_type = device_detector_type::scalar_type;
+
     /// Stepper type used by the track finding and fitting algorithms
     using stepper_type =
-        detray::rk_stepper<detray::bfield::const_field_t::view_t,
+        detray::rk_stepper<detray::bfield::const_field_t<scalar_type>::view_t,
                            device_detector_type::algebra_type,
-                           detray::constrained_step<>>;
+                           detray::constrained_step<scalar_type>>;
     /// Navigator type used by the track finding and fitting algorithms
     using navigator_type = detray::navigator<const device_detector_type>;
     /// Spacepoint formation algorithm type
@@ -95,7 +99,8 @@ class full_chain_algorithm
                          const finding_algorithm::config_type& finding_config,
                          const fitting_algorithm::config_type& fitting_config,
                          const silicon_detector_description::host& det_descr,
-                         host_detector_type* detector);
+                         host_detector_type* detector,
+                         std::unique_ptr<const traccc::Logger> logger);
 
     /// Copy constructor
     ///
@@ -133,7 +138,7 @@ class full_chain_algorithm
     /// Constant B field for the (seed) track parameter estimation
     traccc::vector3 m_field_vec;
     /// Constant B field for the track finding and fitting
-    detray::bfield::const_field_t m_field;
+    detray::bfield::const_field_t<traccc::scalar> m_field;
 
     /// Detector description
     std::reference_wrapper<const silicon_detector_description::host>
@@ -186,7 +191,6 @@ class full_chain_algorithm
     fitting_algorithm::config_type m_fitting_config;
 
     /// @}
-
 };  // class full_chain_algorithm
 
 }  // namespace traccc::cuda

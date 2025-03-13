@@ -14,6 +14,7 @@ traccc_add_test(cpu
     "test_clusterization_resolution.cpp"
     "test_copy.cpp"
     "test_kalman_fitter_hole_count.cpp"
+    "test_kalman_fitter_momentum_resolution.cpp"
     "test_kalman_fitter_telescope.cpp"
     "test_kalman_fitter_wire_chamber.cpp"
     "test_ranges.cpp"
@@ -23,6 +24,6 @@ traccc_add_test(cpu
     "test_track_params_estimation.cpp"
     "test_sanity_ordered_on.cpp"
     "test_sanity_contiguous_on.cpp"
-    LINK_LIBRARIES GTest::gtest_main vecmem::core 
-    traccc_tests_common traccc::core traccc::io traccc::performance 
+    LINK_LIBRARIES GTest::gtest_main vecmem::core
+    traccc_tests_common traccc::core traccc::io traccc::performance
     traccc::simulation detray::core detray::detectors detray::io detray::test_utils covfie::core )

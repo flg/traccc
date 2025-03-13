@@ -16,25 +16,37 @@
 #include "traccc/edm/container.hpp"
 
 // detray include(s).
-#include "detray/tracks/tracks.hpp"
+#include <detray/tracks/tracks.hpp>
 
 namespace traccc {
 
-using free_track_parameters =
-    detray::free_track_parameters<traccc::default_algebra>;
-using bound_track_parameters =
-    detray::bound_track_parameters<traccc::default_algebra>;
-using free_vector = free_track_parameters::vector_type;
-using bound_vector = bound_track_parameters::vector_type;
-using bound_covariance = bound_track_parameters::covariance_type;
+template <detray::concepts::algebra algebra_t = traccc::default_algebra>
+using free_track_parameters = detray::free_track_parameters<algebra_t>;
+
+template <detray::concepts::algebra algebra_t = traccc::default_algebra>
+using bound_track_parameters = detray::bound_track_parameters<algebra_t>;
+
+template <detray::concepts::algebra algebra_t = traccc::default_algebra>
+using free_vector = typename free_track_parameters<algebra_t>::vector_type;
+
+template <detray::concepts::algebra algebra_t = traccc::default_algebra>
+using bound_vector = typename bound_track_parameters<algebra_t>::vector_type;
+
+template <detray::concepts::algebra algebra_t = traccc::default_algebra>
+using bound_covariance =
+    typename bound_track_parameters<algebra_t>::covariance_type;
+
+template <detray::concepts::algebra algebra_t = traccc::default_algebra>
+using bound_matrix = detray::bound_matrix<algebra_t>;
 
 /// Declare all track_parameters collection types
 using bound_track_parameters_collection_types =
-    collection_types<bound_track_parameters>;
+    collection_types<bound_track_parameters<>>;
 
 // Wrap the phi of track parameters to [-pi,pi]
-TRACCC_HOST_DEVICE
-inline void wrap_phi(bound_track_parameters& param) {
+template <detray::concepts::algebra algebra_t>
+TRACCC_HOST_DEVICE inline void wrap_phi(
+    bound_track_parameters<algebra_t>& param) {
 
     traccc::scalar phi = param.phi();
     static constexpr traccc::scalar TWOPI =
@@ -46,6 +58,22 @@ inline void wrap_phi(bound_track_parameters& param) {
         phi += TWOPI;
     }
     param.set_phi(phi);
+}
+
+/// Covariance inflation used for track fitting
+template <detray::concepts::algebra algebra_t>
+TRACCC_HOST_DEVICE inline void inflate_covariance(
+    bound_track_parameters<algebra_t>& param, const traccc::scalar inf_fac) {
+    auto& cov = param.covariance();
+    for (unsigned int i = 0; i < e_bound_size; i++) {
+        for (unsigned int j = 0; j < e_bound_size; j++) {
+            if (i == j) {
+                getter::element(cov, i, i) *= inf_fac;
+            } else {
+                getter::element(cov, i, j) = 0.f;
+            }
+        }
+    }
 }
 
 }  // namespace traccc

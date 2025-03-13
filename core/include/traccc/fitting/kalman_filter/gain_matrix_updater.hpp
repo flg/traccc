@@ -11,6 +11,10 @@
 #include "traccc/definitions/qualifiers.hpp"
 #include "traccc/definitions/track_parametrization.hpp"
 #include "traccc/edm/track_state.hpp"
+#include "traccc/fitting/status_codes.hpp"
+
+// Detray inlcude(s)
+#include <detray/geometry/shapes/line.hpp>
 
 namespace traccc {
 
@@ -19,10 +23,11 @@ template <typename algebra_t>
 struct gain_matrix_updater {
 
     // Type declarations
-    using matrix_operator = detray::dmatrix_operator<algebra_t>;
     using size_type = detray::dsize_type<algebra_t>;
     template <size_type ROWS, size_type COLS>
     using matrix_type = detray::dmatrix<algebra_t, ROWS, COLS>;
+    using bound_vector_type = traccc::bound_vector<algebra_t>;
+    using bound_matrix_type = traccc::bound_matrix<algebra_t>;
 
     /// Gain matrix updater operation
     ///
@@ -36,28 +41,33 @@ struct gain_matrix_updater {
     ///
     /// @return true if the update succeeds
     template <typename mask_group_t, typename index_t>
-    TRACCC_HOST_DEVICE inline bool operator()(
+    [[nodiscard]] TRACCC_HOST_DEVICE inline kalman_fitter_status operator()(
         const mask_group_t& /*mask_group*/, const index_t& /*index*/,
         track_state<algebra_t>& trk_state,
-        const bound_track_parameters& bound_params) const {
+        const bound_track_parameters<algebra_t>& bound_params) const {
 
         using shape_type = typename mask_group_t::value_type::shape;
 
         const auto D = trk_state.get_measurement().meas_dim;
         assert(D == 1u || D == 2u);
-        if (D == 1u) {
-            return update<1u, shape_type>(trk_state, bound_params);
-        } else if (D == 2u) {
-            return update<2u, shape_type>(trk_state, bound_params);
+        kalman_fitter_status result = kalman_fitter_status::ERROR_OTHER;
+        switch (D) {
+            case 1u:
+                result = update<1u, shape_type>(trk_state, bound_params);
+                break;
+            case 2u:
+                result = update<2u, shape_type>(trk_state, bound_params);
+                break;
+            default:
+                __builtin_unreachable();
         }
-
-        return false;
+        return result;
     }
 
     template <size_type D, typename shape_t>
-    TRACCC_HOST_DEVICE inline bool update(
+    [[nodiscard]] TRACCC_HOST_DEVICE inline kalman_fitter_status update(
         track_state<algebra_t>& trk_state,
-        const bound_track_parameters& bound_params) const {
+        const bound_track_parameters<algebra_t>& bound_params) const {
 
         static_assert(((D == 1u) || (D == 2u)),
                       "The measurement dimension should be 1 or 2");
@@ -65,12 +75,9 @@ struct gain_matrix_updater {
         const auto meas = trk_state.get_measurement();
 
         // Some identity matrices
-        // @Note: Make constexpr work
-        const matrix_type<e_bound_size, e_bound_size> I66 =
-            matrix_operator().template identity<e_bound_size, e_bound_size>();
-
-        const matrix_type<D, D> I_m =
-            matrix_operator().template identity<D, D>();
+        // @TODO: Make constexpr work
+        const auto I66 = matrix::identity<bound_matrix_type>();
+        const auto I_m = matrix::identity<matrix_type<D, D>>();
 
         matrix_type<D, e_bound_size> H = meas.subs.template projector<D>();
 
@@ -79,12 +86,10 @@ struct gain_matrix_updater {
             trk_state.template measurement_local<D>();
 
         // Predicted vector of bound track parameters
-        const matrix_type<e_bound_size, 1>& predicted_vec =
-            bound_params.vector();
+        const bound_vector_type& predicted_vec = bound_params.vector();
 
         // Predicted covaraince of bound track parameters
-        const matrix_type<e_bound_size, e_bound_size>& predicted_cov =
-            bound_params.covariance();
+        const bound_matrix_type& predicted_cov = bound_params.covariance();
 
         // Set track state parameters
         trk_state.predicted().set_vector(predicted_vec);
@@ -103,12 +108,11 @@ struct gain_matrix_updater {
             trk_state.template measurement_covariance<D>();
 
         const matrix_type<D, D> M =
-            H * predicted_cov * matrix_operator().transpose(H) + V;
+            H * predicted_cov * matrix::transpose(H) + V;
 
         // Kalman gain matrix
-        const matrix_type<6, D> K = predicted_cov *
-                                    matrix_operator().transpose(H) *
-                                    matrix_operator().inverse(M);
+        const matrix_type<6, D> K =
+            predicted_cov * matrix::transpose(H) * matrix::inverse(M);
 
         // Calculate the filtered track parameters
         const matrix_type<6, 1> filtered_vec =
@@ -120,25 +124,37 @@ struct gain_matrix_updater {
 
         // Calculate the chi square
         const matrix_type<D, D> R = (I_m - H * K) * V;
-        const matrix_type<1, 1> chi2 = matrix_operator().transpose(residual) *
-                                       matrix_operator().inverse(R) * residual;
+        const matrix_type<1, 1> chi2 =
+            matrix::transpose(residual) * matrix::inverse(R) * residual;
 
         // Return false if track is parallel to z-axis or phi is not finite
         const scalar theta = bound_params.theta();
-        if (theta <= 0.f || theta >= constant<traccc::scalar>::pi ||
-            !std::isfinite(bound_params.phi())) {
-            return false;
+
+        if (theta <= 0.f || theta >= constant<traccc::scalar>::pi) {
+            return kalman_fitter_status::ERROR_THETA_ZERO;
+        }
+
+        if (!std::isfinite(bound_params.phi())) {
+            return kalman_fitter_status::ERROR_INVERSION;
+        }
+
+        if (std::abs(bound_params.qop()) == 0.f) {
+            return kalman_fitter_status::ERROR_QOP_ZERO;
+        }
+
+        if (getter::element(chi2, 0, 0) < 0.f) {
+            return kalman_fitter_status::ERROR_UPDATER_CHI2_NEGATIVE;
         }
 
         // Set the track state parameters
         trk_state.filtered().set_vector(filtered_vec);
         trk_state.filtered().set_covariance(filtered_cov);
-        trk_state.filtered_chi2() = matrix_operator().element(chi2, 0, 0);
+        trk_state.filtered_chi2() = getter::element(chi2, 0, 0);
 
         // Wrap the phi in the range of [-pi, pi]
         wrap_phi(trk_state.filtered());
 
-        return true;
+        return kalman_fitter_status::SUCCESS;
     }
 };
 

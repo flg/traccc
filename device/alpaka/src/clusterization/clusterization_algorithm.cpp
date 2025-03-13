@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2024 CERN for the benefit of the ACTS project
+ * (c) 2024-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -9,10 +9,10 @@
 #include "traccc/alpaka/clusterization/clusterization_algorithm.hpp"
 
 #include "../utils/barrier.hpp"
+#include "../utils/thread_id.hpp"
 #include "../utils/utils.hpp"
 
 // Project include(s)
-#include "traccc/alpaka/utils/thread_id.hpp"
 #include "traccc/clusterization/clustering_config.hpp"
 #include "traccc/clusterization/device/ccl_kernel.hpp"
 
@@ -36,7 +36,7 @@ struct CCLKernel {
         measurement_collection_types::view measurements_view,
         vecmem::data::vector_view<unsigned int> cell_links) const {
 
-        traccc::alpaka::thread_id1 thread_id(acc);
+        details::thread_id1 thread_id(acc);
 
         auto& partition_start =
             ::alpaka::declareSharedVar<std::size_t, __COUNTER__>(acc);
@@ -72,8 +72,9 @@ struct ZeroMutexKernel {
 
 clusterization_algorithm::clusterization_algorithm(
     const traccc::memory_resource& mr, vecmem::copy& copy,
-    const config_type& config)
-    : m_config(config),
+    const config_type& config, std::unique_ptr<const Logger> logger)
+    : messaging(std::move(logger)),
+      m_config(config),
       m_mr(mr),
       m_copy(copy),
       m_f_backup(m_config.backup_size(), m_mr.main),

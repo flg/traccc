@@ -1,11 +1,14 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022-2024 CERN for the benefit of the ACTS project
+ * (c) 2022-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
 
 #pragma once
+
+// Project include(s)
+#include "traccc/geometry/detector.hpp"
 
 // Command line option include(s).
 #include "traccc/options/clusterization.hpp"
@@ -15,6 +18,7 @@
 #include "traccc/options/threading.hpp"
 #include "traccc/options/throughput.hpp"
 #include "traccc/options/track_finding.hpp"
+#include "traccc/options/track_fitting.hpp"
 #include "traccc/options/track_propagation.hpp"
 #include "traccc/options/track_seeding.hpp"
 
@@ -67,6 +71,9 @@ namespace traccc {
 template <typename FULL_CHAIN_ALG, typename HOST_MR>
 int throughput_mt(std::string_view description, int argc, char* argv[],
                   bool use_host_caching) {
+    std::unique_ptr<const traccc::Logger> ilogger = traccc::getDefaultLogger(
+        "ThroughputExample", traccc::Logging::Level::INFO);
+    TRACCC_LOCAL_LOGGER(std::move(ilogger));
 
     // Program options.
     opts::detector detector_opts;
@@ -75,14 +82,17 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
     opts::track_seeding seeding_opts;
     opts::track_finding finding_opts;
     opts::track_propagation propagation_opts;
+    opts::track_fitting fitting_opts;
     opts::throughput throughput_opts;
     opts::threading threading_opts;
     opts::program_options program_opts{
         description,
         {detector_opts, input_opts, clusterization_opts, seeding_opts,
-         finding_opts, propagation_opts, throughput_opts, threading_opts},
+         finding_opts, propagation_opts, fitting_opts, throughput_opts,
+         threading_opts},
         argc,
-        argv};
+        argv,
+        logger().cloneWithSuffix("Options")};
 
     // Set up the timing info holder.
     performance::timing_info times;
@@ -124,8 +134,8 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
                      event != event_range.end(); ++event) {
                     static constexpr bool DEDUPLICATE = true;
                     io::read_cells(input.at(event - input_opts.skip), event,
-                                   input_opts.directory, &det_descr,
-                                   input_opts.format, DEDUPLICATE,
+                                   input_opts.directory, logger().clone(),
+                                   &det_descr, input_opts.format, DEDUPLICATE,
                                    input_opts.use_acts_geom_source);
                 }
             });
@@ -153,7 +163,8 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
         finding_opts);
     finding_cfg.propagation = propagation_config;
 
-    typename FULL_CHAIN_ALG::fitting_algorithm::config_type fitting_cfg;
+    typename FULL_CHAIN_ALG::fitting_algorithm::config_type fitting_cfg(
+        fitting_opts);
     fitting_cfg.propagation = propagation_config;
 
     // Set up the full-chain algorithm(s). One for each thread.
@@ -175,7 +186,8 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
              finding_cfg,
              fitting_cfg,
              det_descr,
-             (detector_opts.use_detray_detector ? &detector : nullptr)});
+             (detector_opts.use_detray_detector ? &detector : nullptr),
+             logger().clone()});
     }
 
     // Set up the TBB arena and thread group. From here on out TBB is only
@@ -187,7 +199,11 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
     tbb::task_group group;
 
     // Seed the random number generator.
-    std::srand(static_cast<unsigned int>(std::time(0)));
+    if (throughput_opts.random_seed == 0u) {
+        std::srand(static_cast<unsigned int>(std::time(0)));
+    } else {
+        std::srand(throughput_opts.random_seed);
+    }
 
     // Dummy count uses output of tp algorithm to ensure the compiler
     // optimisations don't skip any step
@@ -212,7 +228,10 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
 
             // Choose which event to process.
             const std::size_t event =
-                static_cast<std::size_t>(std::rand()) % input_opts.events;
+                (throughput_opts.deterministic_event_order
+                     ? i
+                     : static_cast<std::size_t>(std::rand())) %
+                input_opts.events;
 
             // Launch the processing of the event.
             arena.execute([&, event]() {
@@ -250,7 +269,10 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
 
             // Choose which event to process.
             const std::size_t event =
-                static_cast<std::size_t>(std::rand()) % input_opts.events;
+                (throughput_opts.deterministic_event_order
+                     ? i
+                     : static_cast<std::size_t>(std::rand())) %
+                input_opts.events;
 
             // Launch the processing of the event.
             arena.execute([&, event]() {
@@ -274,17 +296,15 @@ int throughput_mt(std::string_view description, int argc, char* argv[],
     cached_host_mrs.clear();
 
     // Print some results.
-    std::cout << "Reconstructed track parameters: " << rec_track_params.load()
-              << std::endl;
-    std::cout << "Time totals:" << std::endl;
-    std::cout << times << std::endl;
-    std::cout << "Throughput:" << std::endl;
-    std::cout << performance::throughput{throughput_opts.cold_run_events, times,
-                                         "Warm-up processing"}
-              << "\n"
-              << performance::throughput{throughput_opts.processed_events,
-                                         times, "Event processing"}
-              << std::endl;
+    TRACCC_INFO("Reconstructed track parameters: " << rec_track_params.load());
+    TRACCC_INFO("Time totals: " << times);
+
+    performance::throughput throughput_wu{throughput_opts.cold_run_events,
+                                          times, "Warm-up processing"};
+    performance::throughput throughput_pr{throughput_opts.processed_events,
+                                          times, "Event processing"};
+
+    TRACCC_INFO("Throughput:" << throughput_wu << "\n" << throughput_pr);
 
     // Print results to log file
     if (throughput_opts.log_file != "\0") {

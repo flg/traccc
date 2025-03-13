@@ -17,21 +17,15 @@
 #include "traccc/finding/finding_config.hpp"
 #include "traccc/utils/algorithm.hpp"
 #include "traccc/utils/memory_resource.hpp"
+#include "traccc/utils/messaging.hpp"
 
 // detray include(s).
-#include "detray/propagator/actor_chain.hpp"
-#include "detray/propagator/actors/aborters.hpp"
-#include "detray/propagator/actors/parameter_resetter.hpp"
-#include "detray/propagator/actors/parameter_transporter.hpp"
-#include "detray/propagator/actors/pointwise_material_interactor.hpp"
-#include "detray/propagator/propagator.hpp"
+#include <detray/propagator/actors.hpp>
+#include <detray/propagator/propagator.hpp>
 
 // VecMem include(s).
 #include <vecmem/utils/copy.hpp>
 #include <vecmem/utils/cuda/copy.hpp>
-
-// Thrust Library
-#include <thrust/pair.h>
 
 namespace traccc::cuda {
 
@@ -42,7 +36,8 @@ class finding_algorithm
           const typename navigator_t::detector_type::view_type&,
           const typename stepper_t::magnetic_field_type&,
           const typename measurement_collection_types::view&,
-          const bound_track_parameters_collection_types::buffer&)> {
+          const bound_track_parameters_collection_types::buffer&)>,
+      public messaging {
 
     /// Detector type
     using detector_type = typename navigator_t::detector_type;
@@ -61,7 +56,7 @@ class finding_algorithm
 
     /// Actor chain for propagate to the next surface and its propagator type
     using actor_type =
-        detray::actor_chain<detray::dtuple, detray::pathlimit_aborter,
+        detray::actor_chain<detray::pathlimit_aborter<scalar_type>,
                             detray::parameter_transporter<algebra_type>,
                             interaction_register<interactor>, interactor,
                             ckf_aborter>;
@@ -79,8 +74,10 @@ class finding_algorithm
     /// @param mr   The memory resource to use
     /// @param copy Copy object
     /// @param str  Cuda stream object
-    finding_algorithm(const config_type& cfg, const traccc::memory_resource& mr,
-                      vecmem::copy& copy, stream& str);
+    finding_algorithm(
+        const config_type& cfg, const traccc::memory_resource& mr,
+        vecmem::copy& copy, stream& str,
+        std::unique_ptr<const Logger> logger = getDummyLogger().clone());
 
     /// Get config object (const access)
     const finding_config& get_config() const { return m_cfg; }

@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023-2024 CERN for the benefit of the ACTS project
+ * (c) 2023-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -16,18 +16,18 @@
 #include "traccc/options/input_data.hpp"
 #include "traccc/options/performance.hpp"
 #include "traccc/options/program_options.hpp"
+#include "traccc/options/track_fitting.hpp"
 #include "traccc/options/track_propagation.hpp"
 #include "traccc/resolution/fitting_performance_writer.hpp"
 #include "traccc/utils/seed_generator.hpp"
 
 // Detray include(s).
-#include "detray/core/detector.hpp"
-#include "detray/core/detector_metadata.hpp"
-#include "detray/detectors/bfield.hpp"
-#include "detray/io/frontend/detector_reader.hpp"
-#include "detray/navigation/navigator.hpp"
-#include "detray/propagator/propagator.hpp"
-#include "detray/propagator/rk_stepper.hpp"
+#include <detray/core/detector.hpp>
+#include <detray/detectors/bfield.hpp>
+#include <detray/io/frontend/detector_reader.hpp>
+#include <detray/navigation/navigator.hpp>
+#include <detray/propagator/propagator.hpp>
+#include <detray/propagator/rk_stepper.hpp>
 
 // VecMem include(s).
 #include <vecmem/memory/host_memory_resource.hpp>
@@ -44,17 +44,24 @@ namespace po = boost::program_options;
 // The main routine
 //
 int main(int argc, char* argv[]) {
+    std::unique_ptr<const traccc::Logger> ilogger = traccc::getDefaultLogger(
+        "TracccExampleTruthFitting", traccc::Logging::Level::INFO);
+
+    TRACCC_LOCAL_LOGGER(std::move(ilogger));
 
     // Program options.
     traccc::opts::detector detector_opts;
     traccc::opts::input_data input_opts;
     traccc::opts::track_propagation propagation_opts;
+    traccc::opts::track_fitting fitting_opts;
     traccc::opts::performance performance_opts;
     traccc::opts::program_options program_opts{
         "Truth Track Fitting on the Host",
-        {detector_opts, input_opts, propagation_opts, performance_opts},
+        {detector_opts, input_opts, propagation_opts, fitting_opts,
+         performance_opts},
         argc,
-        argv};
+        argv,
+        logger().cloneWithSuffix("Options")};
 
     /// Type declarations
     using host_detector_type = traccc::default_detector::host;
@@ -72,8 +79,8 @@ int main(int argc, char* argv[]) {
 
     // B field value and its type
     // @TODO: Set B field as argument
-    const traccc::vector3 B{0, 0, 2 * detray::unit<traccc::scalar>::T};
-    auto field = detray::bfield::create_const_field(B);
+    const traccc::vector3 B{0, 0, 2 * traccc::unit<traccc::scalar>::T};
+    auto field = detray::bfield::create_const_field<traccc::scalar>(B);
 
     // Read the detector
     detray::io::detector_reader_config reader_cfg{};
@@ -96,18 +103,19 @@ int main(int argc, char* argv[]) {
 
     /// Standard deviations for seed track parameters
     static constexpr std::array<scalar, e_bound_size> stddevs = {
-        0.03f * detray::unit<scalar>::mm,
-        0.03f * detray::unit<scalar>::mm,
+        0.03f * traccc::unit<scalar>::mm,
+        0.03f * traccc::unit<scalar>::mm,
         0.017f,
         0.017f,
-        0.001f / detray::unit<scalar>::GeV,
-        1.f * detray::unit<scalar>::ns};
+        0.001f / traccc::unit<scalar>::GeV,
+        1.f * traccc::unit<scalar>::ns};
 
     // Fitting algorithm object
-    traccc::fitting_config fit_cfg;
+    traccc::fitting_config fit_cfg(fitting_opts);
     fit_cfg.propagation = propagation_opts;
 
-    traccc::host::kalman_fitting_algorithm host_fitting(fit_cfg, host_mr);
+    traccc::host::kalman_fitting_algorithm host_fitting(
+        fit_cfg, host_mr, logger().clone("FittingAlg"));
 
     // Seed generator
     traccc::seed_generator<host_detector_type> sg(host_det, stddevs);
@@ -128,8 +136,9 @@ int main(int argc, char* argv[]) {
         auto track_states = host_fitting(
             host_det, field, traccc::get_data(truth_track_candidates));
 
-        std::cout << "Number of fitted tracks: " << track_states.size()
-                  << std::endl;
+        std::cout << "Number of fitted tracks: ( "
+                  << count_fitted_tracks(track_states) << " / "
+                  << track_states.size() << " ) " << std::endl;
 
         const decltype(track_states)::size_type n_fitted_tracks =
             track_states.size();

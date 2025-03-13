@@ -1,6 +1,6 @@
 /** Detray library, part of the ACTS project (R&D line)
  *
- * (c) 2023-2024 CERN for the benefit of the ACTS project
+ * (c) 2023-2025 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -16,15 +16,19 @@
 #include "traccc/simulation/measurement_smearer.hpp"
 
 // Detray core include(s).
-#include "detray/definitions/pdg_particle.hpp"
-#include "detray/geometry/tracking_surface.hpp"
-#include "detray/propagator/base_actor.hpp"
-#include "detray/tracks/bound_track_parameters.hpp"
-#include "detray/tracks/free_track_parameters.hpp"
+#include <detray/definitions/pdg_particle.hpp>
+#include <detray/geometry/tracking_surface.hpp>
+#include <detray/propagator/base_actor.hpp>
+#include <detray/tracks/bound_track_parameters.hpp>
+#include <detray/tracks/free_track_parameters.hpp>
 
 // DFE include(s).
 #include <dfe/dfe_io_dsv.hpp>
 #include <dfe/dfe_namedtuple.hpp>
+
+// System include(s).
+#include <filesystem>
+#include <string>
 
 namespace traccc {
 
@@ -45,18 +49,25 @@ struct smearing_writer : detray::actor {
     };
 
     struct state {
-        state(std::size_t event_id, config&& writer_cfg,
+        state(std::size_t event_id, const config& writer_cfg,
               const std::string directory)
-            : m_particle_writer(directory +
-                                traccc::io::get_event_filename(
-                                    event_id, "-particles_initial.csv")),
-              m_hit_writer(directory + traccc::io::get_event_filename(
-                                           event_id, "-hits.csv")),
-              m_meas_writer(directory + traccc::io::get_event_filename(
-                                            event_id, "-measurements.csv")),
+            : m_particle_writer((std::filesystem::path{directory} /
+                                 traccc::io::get_event_filename(
+                                     event_id, "-particles_initial.csv"))
+                                    .native()),
+              m_hit_writer(
+                  (std::filesystem::path{directory} /
+                   traccc::io::get_event_filename(event_id, "-hits.csv"))
+                      .native()),
+              m_meas_writer((std::filesystem::path{directory} /
+                             traccc::io::get_event_filename(
+                                 event_id, "-measurements.csv"))
+                                .native()),
               m_measurement_hit_id_writer(
-                  directory + traccc::io::get_event_filename(
-                                  event_id, "-measurement-simhit-map.csv")),
+                  (std::filesystem::path{directory} /
+                   traccc::io::get_event_filename(
+                       event_id, "-measurement-simhit-map.csv"))
+                      .native()),
               m_meas_smearer(writer_cfg.smearer) {}
 
         uint64_t particle_id = 0u;
@@ -70,7 +81,7 @@ struct smearing_writer : detray::actor {
         void set_seed(const uint_fast64_t sd) { m_meas_smearer.set_seed(sd); }
 
         void write_particle(
-            const detray::free_track_parameters<algebra_type>& track,
+            const traccc::free_track_parameters<algebra_type>& track,
             const detray::pdg_particle<scalar_type>& ptc_type) {
             io::csv::particle particle;
             const auto pos = track.pos();
@@ -96,7 +107,7 @@ struct smearing_writer : detray::actor {
         template <typename mask_group_t, typename index_t>
         inline void operator()(
             const mask_group_t& mask_group, const index_t& index,
-            const detray::bound_track_parameters<algebra_type>& bound_params,
+            const traccc::bound_track_parameters<algebra_type>& bound_params,
             smearer_t& smearer, io::csv::measurement& iomeas) const {
 
             const auto& mask = mask_group[index];

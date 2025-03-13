@@ -14,7 +14,7 @@
 #include "traccc/utils/ranges.hpp"
 
 // detray include(s).
-#include "detray/definitions/pdg_particle.hpp"
+#include <detray/definitions/pdg_particle.hpp>
 
 // System include(s).
 #include <cstddef>
@@ -69,10 +69,7 @@ class generation : public interface {
     ///
     void read(const boost::program_options::variables_map& vm) override;
 
-    private:
-    /// Print the specific options of this class
-    std::ostream& print_impl(std::ostream& out) const override;
-
+    std::unique_ptr<configuration_printable> as_printable() const override;
 };  // struct generation
 
 }  // namespace traccc::opts
