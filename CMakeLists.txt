@@ -8,6 +8,8 @@
 cmake_minimum_required( VERSION 3.25 )
 project( traccc VERSION 1.1.0 LANGUAGES CXX )
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE CACHE BOOL "Generate compile_commands.json" FORCE)
+
 # Set up the used C++ standard(s).
 set( CMAKE_CXX_STANDARD 20 CACHE STRING "The (host) C++ standard to use" )
 set( CMAKE_CXX_EXTENSIONS FALSE CACHE BOOL "Disable (host) C++ extensions" )

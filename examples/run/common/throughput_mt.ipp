@@ -43,6 +43,7 @@
 #include "traccc/seeding/detail/track_params_estimation_config.hpp"
 
 // VecMem include(s).
+#include <stdexcept>
 #include <vecmem/memory/host_memory_resource.hpp>
 
 // TBB include(s).
@@ -97,6 +98,12 @@ int throughput_mt(std::string_view description, int argc, char* argv[]) {
     TRACCC_LOCAL_LOGGER(
         prelogger->clone(std::nullopt, traccc::Logging::Level(logging_opts)));
 
+    char const * const pipeline = getenv("EFTRACKING_PIPELINE");
+    if (pipeline == nullptr) {
+        throw std::runtime_error("environment variable EFTRACKING_PIPELINE must be defined");
+    }
+    TRACCC_INFO("running algo for EFTracking pipeline: " << pipeline);
+
     // Set up the timing info holder.
     performance::timing_info times;
 
@@ -149,10 +156,11 @@ int throughput_mt(std::string_view description, int argc, char* argv[]) {
     // Algorithm configuration(s).
     typename FULL_CHAIN_ALG::clustering_algorithm::config_type clustering_cfg(
         clusterization_opts);
-
     const traccc::seedfinder_config seedfinder_config(seeding_opts);
     const traccc::seedfilter_config seedfilter_config(seeding_opts);
-    const traccc::spacepoint_grid_config spacepoint_grid_config(seeding_opts);
+    // In g200 branch the spacepoint grid config is created from the seeding
+    // config (a bit below), so we disable it here.
+    // const traccc::spacepoint_grid_config spacepoint_grid_config(seeding_opts);
     const traccc::track_params_estimation_config track_params_estimation_config;
 
     traccc::gbts_seedfinder_config gbts_config;
@@ -174,6 +182,80 @@ int throughput_mt(std::string_view description, int argc, char* argv[]) {
     typename FULL_CHAIN_ALG::fitting_algorithm::config_type fitting_cfg(
         fitting_opts);
     fitting_cfg.propagation = propagation_config;
+
+    seedfinder_config.zMin = -3000.f * unit<float>::mm;
+    seedfinder_config.zMax = 3000.f * unit<float>::mm;
+    seedfinder_config.rMax = 320.f * unit<float>::mm;
+    seedfinder_config.rMin = 33.f * unit<float>::mm;
+    // 3 sigmas of max beam spot delta z for Run 3
+    // https://twiki.cern.ch/twiki/pub/AtlasPublic/BeamSpotPublicResults/BeamspotRun2vLumi_sig_z.png
+    seedfinder_config.collisionRegionMax = 3 * 38 * unit<float>::mm;
+    seedfinder_config.collisionRegionMin = -seedfinder_config.collisionRegionMax;
+    // Based on Pixel barrel layers layout:
+    // https://cds.cern.ch/record/2850865/files/ITK_schematic.png
+    // Barrel layers position: 33, 96, 126, 225, 286
+    // Minimum R distance between 2 layers: 30
+    // Max distance between N, N+2 layer (allowing one "hole"): 160
+    // Plus some margin (2 mm)
+    seedfinder_config.deltaRMin = 20 * unit<float>::mm;
+    seedfinder_config.deltaRMax = 100 * unit<float>::mm;
+    seedfinder_config.deltaZMax = 800 * unit<float>::mm;
+
+    seedfinder_config.minPt = 900.f * unit<float>::MeV;
+    seedfinder_config.cotThetaMax = 27.2899f;
+    seedfinder_config.impactMax = 2.f * unit<float>::mm;
+    seedfinder_config.sigmaScattering = 3.0f;
+    seedfinder_config.maxPtScattering = 10.f * unit<float>::GeV;
+    seedfinder_config.radLengthPerSeed = 0.05f;
+    seedfinder_config.maxSeedsPerSpM = 2;
+    seedfinder_config.setup();
+
+    const traccc::spacepoint_grid_config spacepoint_grid_config(
+        seedfinder_config);
+
+    seedfilter_config.good_spB_min_radius = 150.f * unit<float>::mm;
+    seedfilter_config.good_spB_weight_increase = 400.f;
+    seedfilter_config.good_spT_max_radius = 150.f * unit<float>::mm;
+    seedfilter_config.good_spT_weight_increase = 200.f;
+    seedfilter_config.good_spB_min_weight = 380.f;
+    seedfilter_config.seed_min_weight = 200.f;
+    seedfilter_config.spB_min_radius = 43.f * unit<float>::mm;
+    seedfilter_config.compatSeedLimit = 1;
+
+    finding_cfg.max_num_branches_per_seed = 3;
+    finding_cfg.max_num_branches_per_surface = 1;
+    finding_cfg.min_track_candidates_per_track = 7;
+    finding_cfg.max_track_candidates_per_track = 20;
+    finding_cfg.min_step_length_for_next_surface =
+        0.5f * detray::unit<float>::mm;
+    finding_cfg.max_step_counts_for_next_surface = 100;
+    finding_cfg.chi2_max = 10.f;
+    finding_cfg.max_num_skipping_per_cand = 2;
+
+    finding_cfg.propagation.stepping.min_stepsize = 1e-4f * unit<float>::mm;
+    finding_cfg.propagation.stepping.rk_error_tol = 1e-4f * unit<float>::mm;
+    finding_cfg.propagation.stepping.step_constraint =
+        std::numeric_limits<float>::max();
+    finding_cfg.propagation.stepping.path_limit = 5.f * unit<float>::m;
+    finding_cfg.propagation.stepping.max_rk_updates = 10000u;
+    finding_cfg.propagation.stepping.use_mean_loss = true;
+    finding_cfg.propagation.stepping.use_eloss_gradient = false;
+    finding_cfg.propagation.stepping.use_field_gradient = false;
+    finding_cfg.propagation.stepping.do_covariance_transport = true;
+    finding_cfg.propagation.navigation.intersection.overstep_tolerance =
+        -300.f * unit<float>::um;
+
+    finding_cfg.max_num_tracks_per_measurement = 1;
+    finding_cfg.initial_links_per_seed = 20;
+
+    fitting_cfg.propagation.navigation.intersection.min_mask_tolerance =
+        1e-5f * unit<float>::mm;
+    fitting_cfg.propagation.navigation.intersection.max_mask_tolerance =
+        3.f * unit<float>::mm;
+    fitting_cfg.propagation.navigation.intersection.overstep_tolerance =
+        -300.f * unit<float>::um;
+    fitting_cfg.propagation.navigation.search_window[0] = 0u;
+    fitting_cfg.propagation.navigation.search_window[1] = 0u;
 
     // Set up the full-chain algorithm(s). One for each thread.
     std::vector<FULL_CHAIN_ALG> algs;
@@ -269,6 +351,8 @@ int throughput_mt(std::string_view description, int argc, char* argv[]) {
     rec_track_params = 0;
 
     {
+        TRACCC_INFO("start of event processing");
+
         // Set up a progress bar for the event processing.
         indicators::ProgressBar progress_bar{
             indicators::option::BarWidth{50},
@@ -303,6 +387,8 @@ int throughput_mt(std::string_view description, int argc, char* argv[]) {
 
         // Wait for all tasks to finish.
         group.wait();
+
+        TRACCC_INFO("end of event processing");
     }
 
     // Delete the algorithms explicitly before their parent object would go out

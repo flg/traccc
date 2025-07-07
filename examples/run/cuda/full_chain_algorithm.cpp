@@ -9,6 +9,7 @@
 #include "full_chain_algorithm.hpp"
 
 // Project include(s).
+#include "traccc/cuda/seeding/seeding_algorithm.hpp"
 #include "traccc/cuda/utils/make_magnetic_field.hpp"
 #include "traccc/seeding/detail/track_params_estimation_config.hpp"
 
@@ -17,6 +18,7 @@
 
 // System include(s).
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 
 /// Helper macro for checking the return value of CUDA function calls
@@ -212,6 +214,12 @@ full_chain_algorithm::~full_chain_algorithm() = default;
 full_chain_algorithm::output_type full_chain_algorithm::operator()(
     const edm::silicon_cell_collection::host& cells) const {
 
+    if (m_detector == nullptr) {
+        throw std::runtime_error("no detray detector");
+    }
+    // the existence of the env var is enforced in throughput_mt/st.ipp
+    std::string const pipeline = getenv("EFTRACKING_PIPELINE");
+
     // Create device copy of input collections
     edm::silicon_cell_collection::buffer cells_buffer(
         static_cast<unsigned int>(cells.size()), m_cached_device_mr);
@@ -222,6 +230,65 @@ full_chain_algorithm::output_type full_chain_algorithm::operator()(
         m_clusterization(cells_buffer, m_device_det_descr, m_device_det_cond);
     const measurement_sorting_algorithm::output_type measurements =
         m_measurement_sorting(unsorted_measurements);
+
+    if (pipeline == "g050") {
+        // Copy the measurements back to the host.
+        edm::measurement_collection<default_algebra>::host measurements_host{
+            m_host_mr};
+        m_copy(measurements, measurements_host)->wait();
+
+        // Return an empty object.
+        return output_type{m_host_mr};
+    }
+
+    if (pipeline == "g100") {
+        const spacepoint_formation_algorithm::output_type spacepoints =
+            m_spacepoint_formation(m_device_detector, measurements);
+
+        const triplet_seeding_algorithm::output_type seeds = m_seeding(
+            spacepoints);
+
+        edm::measurement_collection<default_algebra>::host measurements_host{
+            m_host_mr};
+        edm::spacepoint_collection::host spacepoints_host(m_host_mr);
+        edm::seed_collection::host seeds_host(m_host_mr);
+        m_copy(measurements, measurements_host)->wait();
+        m_copy(spacepoints, spacepoints_host)->wait();
+        m_copy(seeds, seeds_host)->wait();
+
+        // Return an empty object.
+        return output_type{m_host_mr};
+    }
+
+    if (pipeline == "g200") {
+        const spacepoint_formation_algorithm::output_type spacepoints =
+            m_spacepoint_formation(m_device_detector, measurements);
+        const seed_parameter_estimation_algorithm::output_type track_params =
+            m_track_parameter_estimation(m_field, measurements, spacepoints,
+                                         m_seeding(spacepoints));
+
+        // Run the track finding (asynchronously).
+        const finding_algorithm::output_type track_candidates =
+            m_finding(m_device_detector, m_field, measurements, track_params);
+
+        // Run the track fitting (asynchronously).
+        // const fitting_algorithm::output_type track_states = m_fitting(
+        //     m_device_detector, m_field, track_candidates);
+
+        // Copy a limited amount of result data back to the host.
+        const auto host_tracks =
+            // m_copy.to(track_states.tracks, m_cached_pinned_host_mr, nullptr,
+            m_copy.to(track_candidates.tracks, m_cached_pinned_host_mr, nullptr,
+                      vecmem::copy::type::device_to_host);
+        output_type result{m_host_mr};
+        vecmem::copy host_copy;
+        host_copy(host_tracks, result)->wait();
+        return result;
+    }
+
+    std::ostringstream oss;
+    oss << "unsupported pipeline: " << pipeline;
+    throw std::runtime_error(oss.str());
 
     // If we have a Detray detector, run the seeding, track finding and fitting.
     if (m_detector != nullptr) {
