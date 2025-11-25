@@ -207,7 +207,12 @@ full_chain_algorithm::output_type full_chain_algorithm::operator()(
         const spacepoint_formation_algorithm::output_type spacepoints =
             m_spacepoint_formation(m_device_detector, measurements);
 
-        const seeding_algorithm::output_type seeds = m_seeding(spacepoints);
+        seeding_algorithm::output_type seeds;
+        if (usingGBTS) {
+            seeds = m_gbts_seeding(spacepoints, measurements);
+        } else {
+            seeds = m_seeding(spacepoints);
+        }
 
         edm::measurement_collection<default_algebra>::host measurements_host{
             m_host_mr};
@@ -224,9 +229,17 @@ full_chain_algorithm::output_type full_chain_algorithm::operator()(
     if (pipeline == "g200") {
         const spacepoint_formation_algorithm::output_type spacepoints =
             m_spacepoint_formation(m_device_detector, measurements);
+
+        seeding_algorithm::output_type seeds;
+        if (usingGBTS) {
+            seeds = m_gbts_seeding(spacepoints, measurements);
+        } else {
+            seeds = m_seeding(spacepoints);
+        }
+
         const track_params_estimation::output_type track_params =
             m_track_parameter_estimation(measurements, spacepoints,
-                                         m_seeding(spacepoints), m_field_vec);
+                                         seeds, m_field_vec);
 
         // Run the track finding (asynchronously).
         const finding_algorithm::output_type track_candidates =
