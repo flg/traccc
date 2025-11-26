@@ -7,5 +7,8 @@
    "sonarlint.connectedMode.project": {
       "connectionId": "acts-project",
       "projectKey": "acts-project_traccc"
-   }
+   },
+   "clangd.arguments": [
+      "--compile-command-dir=/home/flegoff/build/tracccgbts"
+   ]
 }

@@ -154,8 +154,8 @@ int throughput_mt(std::string_view description, int argc, char* argv[]) {
     // Algorithm configuration(s).
     typename FULL_CHAIN_ALG::clustering_algorithm::config_type clustering_cfg(
         clusterization_opts);
-    const traccc::seedfinder_config seedfinder_config(seeding_opts);
-    const traccc::seedfilter_config seedfilter_config(seeding_opts);
+    traccc::seedfinder_config seedfinder_config(seeding_opts);
+    traccc::seedfilter_config seedfilter_config(seeding_opts);
     // In g200 branch the spacepoint grid config is created from the seeding
     // config (a bit below), so we disable it here.
     // const traccc::spacepoint_grid_config spacepoint_grid_config(seeding_opts);
