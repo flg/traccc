@@ -9,7 +9,7 @@
 #include "full_chain_algorithm.hpp"
 
 // Project include(s).
-#include "traccc/cuda/seeding/seeding_algorithm.hpp"
+#include "traccc/seeding/seeding_algorithm.hpp"
 #include "traccc/cuda/utils/make_magnetic_field.hpp"
 #include "traccc/seeding/detail/track_params_estimation_config.hpp"
 
